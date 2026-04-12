@@ -54,9 +54,9 @@ describe("move invariants", () => {
 });
 
 describe("search smoke", () => {
-  test("returns a bounded search result", () => {
+  test("returns a bounded search result", async () => {
     const state = stateFromSnapshot(parseSnapshotFile(snapshot));
-    const result = solveState(state, null, { beamWidth: 50, maxDepth: 4, timeBudgetMs: 2000 });
+    const result = await solveState(state, null, { beamWidth: 50, maxDepth: 4, timeBudgetMs: 2000 });
     expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(result.nodesExpanded).toBeGreaterThanOrEqual(0);
     if (result.solved) {
@@ -68,9 +68,9 @@ describe("search smoke", () => {
     }
   });
 
-  test("target-state mode solves immediately when already at target", () => {
+  test("target-state mode solves immediately when already at target", async () => {
     const state = stateFromSnapshot(parseSnapshotFile(snapshot));
-    const result = solveState(state, state, { timeBudgetMs: 500 });
+    const result = await solveState(state, state, { timeBudgetMs: 500 });
     expect(result.solved).toBe(true);
     expect(result.moves).toHaveLength(0);
   });

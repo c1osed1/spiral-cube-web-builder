@@ -36,6 +36,8 @@ export interface SearchOptions {
   unlimitedTime?: boolean;
   /** Как интерпретировать индексы в bonds (для auto: max индекса <= 64 → cubie id, иначе стикеры 0..95). */
   bondMode?: BondInterpretation;
+  /** Воркер: периодически проверять, чтобы обработать «Стоп» и новый «Старт». */
+  shouldAbort?: () => boolean;
 }
 
 export interface SearchProgress {
@@ -49,7 +51,7 @@ export interface SearchProgress {
 
 export interface SearchResult {
   solved: boolean;
-  reason: "solved" | "timeout" | "depth_limit" | "frontier_exhausted";
+  reason: "solved" | "timeout" | "depth_limit" | "frontier_exhausted" | "aborted";
   moves: MoveName[];
   elapsedMs: number;
   nodesExpanded: number;

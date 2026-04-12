@@ -38,25 +38,62 @@ function bondMode(cfg: SearchOptions): BondInterpretation {
   return cfg.bondMode ?? "auto";
 }
 
-export function solveState(
+function checkSearchStop(cfg: SearchOptions, startedAt: number): "ok" | "abort" | "timeout" {
+  if (cfg.shouldAbort?.()) {
+    return "abort";
+  }
+  if (timeLimitExceeded(cfg, startedAt)) {
+    return "timeout";
+  }
+  return "ok";
+}
+
+/** Lets the worker event loop run so «Стоп» / новый «Старт» обрабатываются. */
+async function yieldIfNeeded(
+  cfg: SearchOptions,
+  startedAt: number,
+  nodesExpanded: number
+): Promise<"ok" | "abort" | "timeout"> {
+  const first = checkSearchStop(cfg, startedAt);
+  if (first !== "ok") {
+    return first;
+  }
+  const chunk = cfg.progressEveryExpansions ?? DEFAULT_SEARCH_OPTIONS.progressEveryExpansions;
+  if (!cfg.shouldAbort || nodesExpanded === 0 || nodesExpanded % chunk !== 0) {
+    return "ok";
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  return checkSearchStop(cfg, startedAt);
+}
+
+export async function solveState(
   initialState: CubeState,
   targetState: CubeState | null = null,
   options: Partial<SearchOptions> = {},
   onProgress?: (progress: SearchProgress) => void
-): SearchResult {
+): Promise<SearchResult> {
   const cfg = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const startedAt = performance.now();
+
+  if (cfg.shouldAbort) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (cfg.shouldAbort()) {
+      return makeResult(false, "aborted", [], performance.now() - startedAt, 0);
+    }
+  }
+
   if (cfg.strategy === "complete") {
     return solveStateComplete(initialState, targetState, cfg, onProgress);
   }
   return solveStateBeam(initialState, targetState, cfg, onProgress);
 }
 
-function solveStateBeam(
+async function solveStateBeam(
   initialState: CubeState,
   targetState: CubeState | null,
   cfg: SearchOptions,
   onProgress?: (progress: SearchProgress) => void
-): SearchResult {
+): Promise<SearchResult> {
   const startedAt = performance.now();
   const targetKey = targetState ? serializeState(targetState) : null;
   const targetStickers = targetState?.stickers ?? null;
@@ -85,9 +122,15 @@ function solveStateBeam(
   }
 
   for (let depth = 0; depth < cfg.maxDepth; depth += 1) {
-    const elapsed = performance.now() - startedAt;
-    if (timeLimitExceeded(cfg, startedAt)) {
-      return makeResult(false, "timeout", bestNode.path, elapsed, nodesExpanded);
+    if (cfg.shouldAbort) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const st = checkSearchStop(cfg, startedAt);
+      if (st === "abort") {
+        return makeResult(false, "aborted", bestNode.path, performance.now() - startedAt, nodesExpanded);
+      }
+      if (st === "timeout") {
+        return makeResult(false, "timeout", bestNode.path, performance.now() - startedAt, nodesExpanded);
+      }
     }
 
     const nextLayer: SearchNode[] = [];
@@ -127,6 +170,14 @@ function solveStateBeam(
             bestPath: bestNode.path
           });
         }
+
+        const y = await yieldIfNeeded(cfg, startedAt, nodesExpanded);
+        if (y === "abort") {
+          return makeResult(false, "aborted", bestNode.path, performance.now() - startedAt, nodesExpanded);
+        }
+        if (y === "timeout") {
+          return makeResult(false, "timeout", bestNode.path, performance.now() - startedAt, nodesExpanded);
+        }
       }
     }
 
@@ -143,12 +194,12 @@ function solveStateBeam(
   return makeResult(false, "depth_limit", bestNode.path, totalElapsed, nodesExpanded);
 }
 
-function solveStateComplete(
+async function solveStateComplete(
   initialState: CubeState,
   targetState: CubeState | null,
   cfg: SearchOptions,
   onProgress?: (progress: SearchProgress) => void
-): SearchResult {
+): Promise<SearchResult> {
   const startedAt = performance.now();
   const targetKey = targetState ? serializeState(targetState) : null;
   const targetStickers = targetState?.stickers ?? null;
@@ -172,10 +223,21 @@ function solveStateComplete(
   const depthEnd = cfg.searchUntilSolved ? Number.MAX_SAFE_INTEGER : cfg.maxDepth;
 
   for (let depthLimit = depthStart; depthLimit <= depthEnd; depthLimit += 1) {
+    if (cfg.shouldAbort) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const st = checkSearchStop(cfg, startedAt);
+      if (st === "abort") {
+        return makeResult(false, "aborted", bestPath, performance.now() - startedAt, nodesExpanded);
+      }
+      if (st === "timeout") {
+        return makeResult(false, "timeout", bestPath, performance.now() - startedAt, nodesExpanded);
+      }
+    }
+
     const pathSet = new Set<string>([serializeState(initialState)]);
     /** Shorter prefix to the same full state dominates longer ones; skip redundant re-expansion. */
     const minPathLenByState = new Map<string, number>();
-    const found = dfsDepthLimited({
+    const found = await dfsDepthLimited({
       state: initialState,
       prevMove: undefined,
       depthRemaining: depthLimit,
@@ -210,6 +272,9 @@ function solveStateComplete(
     if (found.status === "timeout") {
       return makeResult(false, "timeout", bestPath, performance.now() - startedAt, nodesExpanded);
     }
+    if (found.status === "aborted") {
+      return makeResult(false, "aborted", bestPath, performance.now() - startedAt, nodesExpanded);
+    }
   }
 
   return makeResult(false, "depth_limit", bestPath, performance.now() - startedAt, nodesExpanded);
@@ -235,8 +300,18 @@ interface DfsArgs {
   onProgress?: (progress: SearchProgress) => void;
 }
 
-function dfsDepthLimited(args: DfsArgs): { status: "solved"; path: MoveName[] } | { status: "timeout" } | { status: "continue" } {
-  if (timeLimitExceeded(args.cfg, args.startedAt)) {
+type DfsOutcome =
+  | { status: "solved"; path: MoveName[] }
+  | { status: "timeout" }
+  | { status: "continue" }
+  | { status: "aborted" };
+
+async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
+  const st0 = checkSearchStop(args.cfg, args.startedAt);
+  if (st0 === "abort") {
+    return { status: "aborted" };
+  }
+  if (st0 === "timeout") {
     return { status: "timeout" };
   }
   if (isGoalState(args.state, args.targetKey)) {
@@ -276,8 +351,16 @@ function dfsDepthLimited(args: DfsArgs): { status: "solved"; path: MoveName[] } 
       });
     }
 
+    const y = await yieldIfNeeded(args.cfg, args.startedAt, args.stats.nodesExpanded);
+    if (y === "abort") {
+      return { status: "aborted" };
+    }
+    if (y === "timeout") {
+      return { status: "timeout" };
+    }
+
     args.pathSet.add(key);
-    const found = dfsDepthLimited({
+    const found = await dfsDepthLimited({
       ...args,
       state: nextState,
       prevMove: move,

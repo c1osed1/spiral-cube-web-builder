@@ -2,7 +2,7 @@
 
 import { solveState } from "../solver/search";
 import { parseSnapshotFile, stateFromSnapshot } from "../solver/state";
-import type { WorkerEvent, WorkerRequest } from "../ui/types";
+import type { WorkerEvent, WorkerRequest, WorkerSolveRequest } from "../ui/types";
 
 let generation = 0;
 
@@ -20,7 +20,21 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     return;
   }
 
+  void runSolveJob(request);
+};
+
+async function runSolveJob(request: WorkerSolveRequest): Promise<void> {
   const token = ++generation;
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  if (token !== generation) {
+    return;
+  }
+
+  const options = {
+    ...request.payload.options,
+    shouldAbort: () => token !== generation
+  };
+
   try {
     const snapshot = parseSnapshotFile(request.payload.snapshot);
     const initialState = stateFromSnapshot(snapshot);
@@ -29,7 +43,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       : null;
     const targetState = targetSnapshot ? stateFromSnapshot(targetSnapshot) : null;
 
-    const result = solveState(initialState, targetState, request.payload.options, (progress) => {
+    const result = await solveState(initialState, targetState, options, (progress) => {
       if (token !== generation) {
         return;
       }
@@ -50,7 +64,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       payload: { message: error instanceof Error ? error.message : "Unknown solver error." }
     });
   }
-};
+}
 
 function emit(message: WorkerEvent): void {
   self.postMessage(message);

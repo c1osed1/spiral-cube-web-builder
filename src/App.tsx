@@ -19,7 +19,7 @@ import { CubeView } from "./ui/CubeView";
 import { SolverPanel } from "./ui/SolverPanel";
 import { Cube3DView } from "./ui/Cube3DView";
 import { DEFAULT_SOLVER_SETTINGS, SolverSettings, toWorkerSearchOptions, type SolverSettingsForm } from "./ui/SolverSettings";
-import type { WorkerEvent, WorkerRequest } from "./ui/types";
+import type { WorkerEvent, WorkerRequest, WorkerSolveRequest } from "./ui/types";
 
 const defaultSnapshot = parseSnapshotFile(snapshotData);
 const defaultTargetSnapshot = parseSnapshotFile(doneData);
@@ -160,10 +160,24 @@ function App(): JSX.Element {
     if (!workerRef.current) {
       return;
     }
-    const payload: WorkerRequest = {
+    let snap: SnapshotFile;
+    try {
+      snap = parseSnapshotFile(JSON.parse(snapshotText));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Невалидный JSON снимка.");
+      return;
+    }
+    const parsedState = stateFromSnapshot(snap);
+    setSnapshot(snap);
+    setEditorSnapshot(snap);
+    setInitialState(parsedState);
+    setSelectedSticker(null);
+    setBondDragStartIndex(null);
+
+    const payload: WorkerSolveRequest = {
       type: "solve",
       payload: {
-        snapshot,
+        snapshot: snap,
         targetSnapshot,
         options: toWorkerSearchOptions(solverSettings)
       }

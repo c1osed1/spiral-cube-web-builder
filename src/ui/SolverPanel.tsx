@@ -128,6 +128,8 @@ function reasonLabel(reason: SearchResult["reason"]): string {
       return "лимит глубины";
     case "frontier_exhausted":
       return "фронтир исчерпан";
+    case "aborted":
+      return "остановлено";
     default:
       return reason;
   }
