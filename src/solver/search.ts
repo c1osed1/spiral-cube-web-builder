@@ -173,12 +173,15 @@ function solveStateComplete(
 
   for (let depthLimit = depthStart; depthLimit <= depthEnd; depthLimit += 1) {
     const pathSet = new Set<string>([serializeState(initialState)]);
+    /** Shorter prefix to the same full state dominates longer ones; skip redundant re-expansion. */
+    const minPathLenByState = new Map<string, number>();
     const found = dfsDepthLimited({
       state: initialState,
       prevMove: undefined,
       depthRemaining: depthLimit,
       path: [],
       pathSet,
+      minPathLenByState,
       targetKey,
       targetStickers,
       targetBondKey,
@@ -218,6 +221,7 @@ interface DfsArgs {
   depthRemaining: number;
   path: MoveName[];
   pathSet: Set<string>;
+  minPathLenByState: Map<string, number>;
   targetKey: string | null;
   targetStickers: CubeState["stickers"] | null;
   targetBondKey: string | null;
@@ -250,8 +254,15 @@ function dfsDepthLimited(args: DfsArgs): { status: "solved"; path: MoveName[] } 
       continue;
     }
 
-    args.stats.incNodes();
     const nextPath = [...args.path, move];
+    const pathLen = nextPath.length;
+    const prevBest = args.minPathLenByState.get(key);
+    if (prevBest !== undefined && prevBest <= pathLen) {
+      continue;
+    }
+    args.minPathLenByState.set(key, pathLen);
+
+    args.stats.incNodes();
     args.stats.updateBest(evaluateState(nextState, args.targetStickers, args.targetBondKey), nextPath);
 
     if (args.stats.nodesExpanded % args.cfg.progressEveryExpansions === 0 && args.onProgress) {
