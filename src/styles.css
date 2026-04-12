@@ -307,3 +307,34 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.solver-settings .hint {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0 0 10px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.settings-grid select,
+.settings-grid input[type="number"] {
+  width: 100%;
+}
+
+.checkbox-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}

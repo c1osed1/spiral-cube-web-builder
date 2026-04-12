@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import snapshot from "../../spyral4-assembly.json";
-import { isMoveBandageLegal, legalMoves } from "./bandage";
+import { cubieAffectedCountForTest, isMoveBandageLegal, legalMoves, resolveBondModel } from "./bandage";
 import { applyMove } from "./moves";
 import { solveState } from "./search";
 import { isSolved, parseSnapshotFile, stateFromSnapshot } from "./state";
@@ -42,6 +42,14 @@ describe("move invariants", () => {
     const state = stateFromSnapshot(parseSnapshotFile(snapshot));
     const strict = legalMoves(state);
     expect(strict.some((move) => move.includes("w") || /^[uldrfb]/.test(move))).toBe(true);
+  });
+
+  test("cubie bond model: Rw rotates more mini-cubies than R", () => {
+    const state = stateFromSnapshot(parseSnapshotFile(snapshot));
+    expect(resolveBondModel(state, "cubie").mode).toBe("cubie");
+    expect(cubieAffectedCountForTest("R")).toBe(16);
+    expect(cubieAffectedCountForTest("Rw")).toBe(32);
+    expect(cubieAffectedCountForTest("r")).toBe(16);
   });
 });
 

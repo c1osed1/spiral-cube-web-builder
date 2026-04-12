@@ -1,7 +1,14 @@
 import { applyMove } from "./moves";
 import { legalMoves } from "./bandage";
 import { isSolved, scoreState, serializeBondState, serializeState } from "./state";
-import type { CubeState, MoveName, SearchOptions, SearchProgress, SearchResult } from "./types";
+import type {
+  BondInterpretation,
+  CubeState,
+  MoveName,
+  SearchOptions,
+  SearchProgress,
+  SearchResult
+} from "./types";
 
 interface SearchNode {
   state: CubeState;
@@ -15,8 +22,21 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   timeBudgetMs: 300_000,
   progressEveryExpansions: 1500,
   strategy: "beam",
-  searchUntilSolved: false
+  searchUntilSolved: false,
+  unlimitedTime: false,
+  bondMode: "auto"
 };
+
+function timeLimitExceeded(cfg: SearchOptions, startedAt: number): boolean {
+  if (cfg.unlimitedTime || (cfg.timeBudgetMs ?? 0) <= 0) {
+    return false;
+  }
+  return performance.now() - startedAt > cfg.timeBudgetMs;
+}
+
+function bondMode(cfg: SearchOptions): BondInterpretation {
+  return cfg.bondMode ?? "auto";
+}
 
 export function solveState(
   initialState: CubeState,
@@ -66,14 +86,14 @@ function solveStateBeam(
 
   for (let depth = 0; depth < cfg.maxDepth; depth += 1) {
     const elapsed = performance.now() - startedAt;
-    if (elapsed > cfg.timeBudgetMs) {
+    if (timeLimitExceeded(cfg, startedAt)) {
       return makeResult(false, "timeout", bestNode.path, elapsed, nodesExpanded);
     }
 
     const nextLayer: SearchNode[] = [];
     for (const node of frontier) {
       const prev = node.path[node.path.length - 1];
-      const moves = legalMoves(node.state, prev);
+      const moves = legalMoves(node.state, prev, bondMode(cfg));
       for (const move of moves) {
         const nextState = applyMove(node.state, move);
         const key = serializeState(nextState);
@@ -212,7 +232,7 @@ interface DfsArgs {
 }
 
 function dfsDepthLimited(args: DfsArgs): { status: "solved"; path: MoveName[] } | { status: "timeout" } | { status: "continue" } {
-  if (performance.now() - args.startedAt > args.cfg.timeBudgetMs) {
+  if (timeLimitExceeded(args.cfg, args.startedAt)) {
     return { status: "timeout" };
   }
   if (isGoalState(args.state, args.targetKey)) {
@@ -222,7 +242,7 @@ function dfsDepthLimited(args: DfsArgs): { status: "solved"; path: MoveName[] } 
     return { status: "continue" };
   }
 
-  const moves = legalMoves(args.state, args.prevMove);
+  const moves = legalMoves(args.state, args.prevMove, bondMode(args.cfg));
   for (const move of moves) {
     const nextState = applyMove(args.state, move);
     const key = serializeState(nextState);

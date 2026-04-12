@@ -18,6 +18,7 @@ import {
 import { CubeView } from "./ui/CubeView";
 import { SolverPanel } from "./ui/SolverPanel";
 import { Cube3DView } from "./ui/Cube3DView";
+import { DEFAULT_SOLVER_SETTINGS, SolverSettings, toWorkerSearchOptions, type SolverSettingsForm } from "./ui/SolverSettings";
 import type { WorkerEvent, WorkerRequest } from "./ui/types";
 
 const defaultSnapshot = parseSnapshotFile(snapshotData);
@@ -61,6 +62,7 @@ function App(): JSX.Element {
   const [savedConfigs, setSavedConfigs] = useState<SavedCubeConfig[]>(() => loadSavedConfigs());
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [configNameDraft, setConfigNameDraft] = useState("Новый конфиг");
+  const [solverSettings, setSolverSettings] = useState<SolverSettingsForm>(() => ({ ...DEFAULT_SOLVER_SETTINGS }));
 
   useEffect(() => {
     const worker = new Worker(new URL("./worker/solver.worker.ts", import.meta.url), {
@@ -99,7 +101,10 @@ function App(): JSX.Element {
     [initialState, solutionMoves, playbackStep]
   );
   const visibleState = isAnimating || playbackStep > 0 ? playbackState : editorState;
-  const visibleLegalMoves = useMemo(() => legalMoves(visibleState), [visibleState]);
+  const visibleLegalMoves = useMemo(
+    () => legalMoves(visibleState, undefined, solverSettings.bondMode ?? "auto"),
+    [visibleState, solverSettings.bondMode]
+  );
 
   useEffect(() => {
     persistSavedConfigs(savedConfigs);
@@ -160,14 +165,7 @@ function App(): JSX.Element {
       payload: {
         snapshot,
         targetSnapshot,
-        options: {
-          beamWidth: 2600,
-          maxDepth: 220,
-          timeBudgetMs: 420_000,
-          progressEveryExpansions: 2000,
-          strategy: "complete",
-          searchUntilSolved: true
-        }
+        options: toWorkerSearchOptions(solverSettings)
       }
     };
 
@@ -508,6 +506,8 @@ function App(): JSX.Element {
           </div>
         </div>
       </section>
+
+      <SolverSettings value={solverSettings} onChange={setSolverSettings} disabled={running} />
 
       <SolverPanel
         running={running}

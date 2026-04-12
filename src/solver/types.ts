@@ -23,6 +23,8 @@ export interface CubeState {
   bonds: Bond[];
 }
 
+export type BondInterpretation = "auto" | "sticker" | "cubie";
+
 export interface SearchOptions {
   beamWidth: number;
   maxDepth: number;
@@ -30,6 +32,10 @@ export interface SearchOptions {
   progressEveryExpansions: number;
   strategy?: "beam" | "complete";
   searchUntilSolved?: boolean;
+  /** Если true или timeBudgetMs <= 0 — не останавливать по времени (осторожно: браузер может зависнуть). */
+  unlimitedTime?: boolean;
+  /** Как интерпретировать индексы в bonds (для auto: max индекса <= 64 → cubie id, иначе стикеры 0..95). */
+  bondMode?: BondInterpretation;
 }
 
 export interface SearchProgress {
