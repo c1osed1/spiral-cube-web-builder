@@ -1,0 +1,309 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color: #e2e8f0;
+  background-color: #0f172a;
+}
+
+body {
+  margin: 0;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+}
+
+.panel {
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 8px;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0b1220;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.panel input:not([type="range"]) {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0b1220;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid #64748b;
+  background: #1d4ed8;
+  color: white;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.metrics p {
+  margin: 4px 0;
+}
+
+.log {
+  min-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px;
+  background: #0b1220;
+}
+
+.error {
+  color: #fca5a5;
+}
+
+.cube-net {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.face-block header {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.face-grid {
+  display: grid;
+  gap: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.sticker {
+  display: block;
+  aspect-ratio: 1;
+  border: 1px solid rgba(15, 23, 42, 0.85);
+  border-radius: 2px;
+  padding: 0;
+  min-width: 0;
+  background-clip: padding-box;
+}
+
+.sticker-bonded {
+  box-shadow: inset 0 0 0 2px rgba(217, 70, 239, 0.55);
+}
+
+.sticker-selected {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+}
+
+.sticker-drag-start {
+  outline: 2px dashed #f59e0b;
+  outline-offset: 1px;
+}
+
+.face-wrap {
+  position: relative;
+}
+
+.bond-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bond-line {
+  stroke: rgba(217, 70, 239, 0.95);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.editor-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.palette {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border: 1px solid #64748b;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+
+.chip.active {
+  border-color: #38bdf8;
+}
+
+.bond-list {
+  display: grid;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.bond-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #0b1220;
+}
+
+.bond-row span {
+  flex: 1 1 260px;
+  overflow-wrap: anywhere;
+}
+
+.cube3d-scene {
+  width: 100%;
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  perspective: 900px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 30%, #0f1b33, #080f20);
+  user-select: none;
+  touch-action: none;
+}
+
+.cube3d {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  transform-style: preserve-3d;
+  transition: transform 0.06s linear;
+}
+
+.cube3d-face {
+  position: absolute;
+  width: 168px;
+  height: 168px;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  backface-visibility: hidden;
+}
+
+.cube3d-grid {
+  width: 150px;
+  height: 150px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  position: relative;
+  z-index: 1;
+}
+
+.cube3d-sticker {
+  display: block;
+  border: 1px solid rgba(15, 23, 42, 0.85);
+  border-radius: 2px;
+}
+
+.cube3d-sticker-bonded {
+  box-shadow: inset 0 0 0 2px rgba(217, 70, 239, 0.6);
+}
+
+.cube3d-face-wrap {
+  position: relative;
+}
+
+.cube3d-bond-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.cube3d-bond-line {
+  stroke: rgba(217, 70, 239, 0.95);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.cube3d-label {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.cube3d-front {
+  transform: translateZ(84px);
+}
+
+.cube3d-back {
+  transform: rotateY(180deg) translateZ(84px);
+}
+
+.cube3d-right {
+  transform: rotateY(90deg) translateZ(84px);
+}
+
+.cube3d-left {
+  transform: rotateY(-90deg) translateZ(84px);
+}
+
+.cube3d-top {
+  transform: rotateX(90deg) translateZ(84px);
+}
+
+.cube3d-bottom {
+  transform: rotateX(-90deg) translateZ(84px);
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
