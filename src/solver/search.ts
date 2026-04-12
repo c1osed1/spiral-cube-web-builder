@@ -193,9 +193,13 @@ async function solveStateBeam(
     const nextLayer: SearchNode[] = [];
     for (const node of frontier) {
       const prev = node.path[node.path.length - 1];
-      const moves = legalMoves(node.state, prev, bondMode(cfg));
-      for (const move of moves) {
-        const nextState = applyMove(node.state, move);
+      for (const { move, nextState } of orderedChildMoves(
+        node.state,
+        prev,
+        cfg,
+        targetStickers,
+        targetBondKey
+      )) {
         const key = serializeState(nextState);
         if (seen.has(key)) {
           beamSeenPrunes += 1;
@@ -386,6 +390,25 @@ type DfsOutcome =
   | { status: "continue" }
   | { status: "aborted" };
 
+/** Сначала разветвляем ходы с лучшим эвристическим score — быстрее находим цель и лучший префикс. */
+function orderedChildMoves(
+  state: CubeState,
+  prevMove: MoveName | undefined,
+  cfg: SearchOptions,
+  targetStickers: CubeState["stickers"] | null,
+  targetBondKey: string | null
+): { move: MoveName; nextState: CubeState }[] {
+  const rawMoves = legalMoves(state, prevMove, bondMode(cfg));
+  const pm = prevMove;
+  const moves = pm !== undefined ? rawMoves.filter((m) => m !== inverseMove(pm)) : rawMoves;
+  const scored = moves.map((move) => {
+    const nextState = applyMove(state, move);
+    return { move, nextState, h: evaluateState(nextState, targetStickers, targetBondKey) };
+  });
+  scored.sort((a, b) => a.h - b.h || a.move.localeCompare(b.move));
+  return scored;
+}
+
 async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
   const st0 = checkSearchStop(args.cfg, args.startedAt);
   if (st0 === "abort") {
@@ -401,12 +424,13 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
     return { status: "continue" };
   }
 
-  const rawMoves = legalMoves(args.state, args.prevMove, bondMode(args.cfg));
-  const pm = args.prevMove;
-  const moves = pm !== undefined ? rawMoves.filter((m) => m !== inverseMove(pm)) : rawMoves;
-
-  for (const move of moves) {
-    const nextState = applyMove(args.state, move);
+  for (const { move, nextState } of orderedChildMoves(
+    args.state,
+    args.prevMove,
+    args.cfg,
+    args.targetStickers,
+    args.targetBondKey
+  )) {
     const key = serializeState(nextState);
     if (args.pathSet.has(key)) {
       args.metrics.pathCyclePrunes += 1;

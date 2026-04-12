@@ -122,6 +122,10 @@ export function isSolved(state: CubeState): boolean {
   return FACE_ORDER.every((face) => isFaceUniform(state, face));
 }
 
+/**
+ * Эвристика «6 одноцветных граней»: на каждой грани — сколько стикеров не совпадают с доминирующим цветом,
+ * плюс штраф за число разных цветов (сводит «шахматку» 8+8 к худшему score, чем один пятно).
+ */
 export function scoreState(state: CubeState): number {
   let score = 0;
   for (const face of FACE_ORDER) {
@@ -137,7 +141,8 @@ export function scoreState(state: CubeState): number {
         maxCount = value;
       }
     }
-    score += STICKERS_PER_FACE - maxCount;
+    const distinct = counts.size;
+    score += STICKERS_PER_FACE - maxCount + (distinct - 1);
   }
   return score;
 }
