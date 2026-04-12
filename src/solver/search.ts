@@ -1,4 +1,4 @@
-import { applyMove } from "./moves";
+import { applyMove, inverseMove } from "./moves";
 import { legalMoves } from "./bandage";
 import { isSolved, scoreState, serializeBondState, serializeState } from "./state";
 import type {
@@ -7,7 +7,8 @@ import type {
   MoveName,
   SearchOptions,
   SearchProgress,
-  SearchResult
+  SearchResult,
+  TransposePruneEntry
 } from "./types";
 
 interface SearchNode {
@@ -26,6 +27,46 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   unlimitedTime: false,
   bondMode: "auto"
 };
+
+const MAX_PRUNE_MAP_KEYS = 2500;
+const TOP_PRUNE_UI = 14;
+
+function compactStateId(serialized: string): string {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < serialized.length; i += 1) {
+    h ^= serialized.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function recordPruneHit(
+  map: Map<string, { count: number; minKnownDepth: number }>,
+  fullKey: string,
+  shorterOrEqualDepth: number
+): void {
+  const cur = map.get(fullKey);
+  if (cur) {
+    cur.count += 1;
+    cur.minKnownDepth = Math.min(cur.minKnownDepth, shorterOrEqualDepth);
+    return;
+  }
+  if (map.size >= MAX_PRUNE_MAP_KEYS) {
+    return;
+  }
+  map.set(fullKey, { count: 1, minKnownDepth: shorterOrEqualDepth });
+}
+
+function topPruneEntries(map: Map<string, { count: number; minKnownDepth: number }>): TransposePruneEntry[] {
+  return [...map.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, TOP_PRUNE_UI)
+    .map(([fullKey, v]) => ({
+      stateId: compactStateId(fullKey),
+      prunes: v.count,
+      minKnownDepth: v.minKnownDepth
+    }));
+}
 
 function timeLimitExceeded(cfg: SearchOptions, startedAt: number): boolean {
   if (cfg.unlimitedTime || (cfg.timeBudgetMs ?? 0) <= 0) {
@@ -99,6 +140,8 @@ async function solveStateBeam(
   const targetStickers = targetState?.stickers ?? null;
   const targetBondKey = targetState ? serializeBondState(targetState) : null;
   const seen = new Set<string>([serializeState(initialState)]);
+  const pruneByKey = new Map<string, { count: number; minKnownDepth: number }>();
+  let beamSeenPrunes = 0;
 
   let frontier: SearchNode[] = [
     {
@@ -121,6 +164,20 @@ async function solveStateBeam(
     };
   }
 
+  function emitProgress(frontierSize: number): void {
+    if (!onProgress) return;
+    onProgress({
+      elapsedMs: performance.now() - startedAt,
+      nodesExpanded,
+      frontierSize,
+      bestScore: bestNode.score,
+      bestDepth: bestNode.path.length,
+      bestPath: bestNode.path,
+      beamSeenPrunes,
+      frequentPrunes: topPruneEntries(pruneByKey)
+    });
+  }
+
   for (let depth = 0; depth < cfg.maxDepth; depth += 1) {
     if (cfg.shouldAbort) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -141,6 +198,8 @@ async function solveStateBeam(
         const nextState = applyMove(node.state, move);
         const key = serializeState(nextState);
         if (seen.has(key)) {
+          beamSeenPrunes += 1;
+          recordPruneHit(pruneByKey, key, node.path.length + 1);
           continue;
         }
         seen.add(key);
@@ -160,15 +219,8 @@ async function solveStateBeam(
           return makeResult(true, "solved", path, solvedElapsed, nodesExpanded);
         }
 
-        if (nodesExpanded % cfg.progressEveryExpansions === 0 && onProgress) {
-          onProgress({
-            elapsedMs: performance.now() - startedAt,
-            nodesExpanded,
-            frontierSize: nextLayer.length,
-            bestScore: bestNode.score,
-            bestDepth: bestNode.path.length,
-            bestPath: bestNode.path
-          });
+        if (nodesExpanded % cfg.progressEveryExpansions === 0) {
+          emitProgress(nextLayer.length);
         }
 
         const y = await yieldIfNeeded(cfg, startedAt, nodesExpanded);
@@ -192,6 +244,13 @@ async function solveStateBeam(
 
   const totalElapsed = performance.now() - startedAt;
   return makeResult(false, "depth_limit", bestNode.path, totalElapsed, nodesExpanded);
+}
+
+interface CompleteSearchMetrics {
+  transposePrunes: number;
+  pathCyclePrunes: number;
+  maxPrefixDepthThisIda: number;
+  pruneByKey: Map<string, { count: number; minKnownDepth: number }>;
 }
 
 async function solveStateComplete(
@@ -219,6 +278,13 @@ async function solveStateComplete(
   let bestPath: MoveName[] = [];
   let bestScore = evaluateState(initialState, targetStickers, targetBondKey);
 
+  const metrics: CompleteSearchMetrics = {
+    transposePrunes: 0,
+    pathCyclePrunes: 0,
+    maxPrefixDepthThisIda: 0,
+    pruneByKey: new Map()
+  };
+
   const depthStart = 1;
   const depthEnd = cfg.searchUntilSolved ? Number.MAX_SAFE_INTEGER : cfg.maxDepth;
 
@@ -234,9 +300,11 @@ async function solveStateComplete(
       }
     }
 
+    metrics.maxPrefixDepthThisIda = 0;
+
     const pathSet = new Set<string>([serializeState(initialState)]);
-    /** Shorter prefix to the same full state dominates longer ones; skip redundant re-expansion. */
     const minPathLenByState = new Map<string, number>();
+
     const found = await dfsDepthLimited({
       state: initialState,
       prevMove: undefined,
@@ -249,6 +317,8 @@ async function solveStateComplete(
       targetBondKey,
       startedAt,
       cfg,
+      idaDepthLimit: depthLimit,
+      metrics,
       stats: {
         get nodesExpanded() {
           return nodesExpanded;
@@ -261,6 +331,12 @@ async function solveStateComplete(
             bestScore = score;
             bestPath = [...path];
           }
+        },
+        get bestPath() {
+          return bestPath;
+        },
+        get bestScore() {
+          return bestScore;
         }
       },
       onProgress
@@ -292,10 +368,14 @@ interface DfsArgs {
   targetBondKey: string | null;
   startedAt: number;
   cfg: SearchOptions;
+  idaDepthLimit: number;
+  metrics: CompleteSearchMetrics;
   stats: {
     nodesExpanded: number;
     incNodes: () => void;
     updateBest: (score: number, path: MoveName[]) => void;
+    bestPath: MoveName[];
+    bestScore: number;
   };
   onProgress?: (progress: SearchProgress) => void;
 }
@@ -321,18 +401,27 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
     return { status: "continue" };
   }
 
-  const moves = legalMoves(args.state, args.prevMove, bondMode(args.cfg));
+  const rawMoves = legalMoves(args.state, args.prevMove, bondMode(args.cfg));
+  const pm = args.prevMove;
+  const moves = pm !== undefined ? rawMoves.filter((m) => m !== inverseMove(pm)) : rawMoves;
+
   for (const move of moves) {
     const nextState = applyMove(args.state, move);
     const key = serializeState(nextState);
     if (args.pathSet.has(key)) {
+      args.metrics.pathCyclePrunes += 1;
+      recordPruneHit(args.metrics.pruneByKey, key, args.path.length + 1);
       continue;
     }
 
     const nextPath = [...args.path, move];
     const pathLen = nextPath.length;
+    args.metrics.maxPrefixDepthThisIda = Math.max(args.metrics.maxPrefixDepthThisIda, pathLen);
+
     const prevBest = args.minPathLenByState.get(key);
     if (prevBest !== undefined && prevBest <= pathLen) {
+      args.metrics.transposePrunes += 1;
+      recordPruneHit(args.metrics.pruneByKey, key, prevBest);
       continue;
     }
     args.minPathLenByState.set(key, pathLen);
@@ -345,9 +434,14 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
         elapsedMs: performance.now() - args.startedAt,
         nodesExpanded: args.stats.nodesExpanded,
         frontierSize: 0,
-        bestScore: 0,
-        bestDepth: nextPath.length,
-        bestPath: nextPath
+        bestScore: args.stats.bestScore,
+        bestDepth: args.stats.bestPath.length,
+        bestPath: [...args.stats.bestPath],
+        idaDepthLimit: args.idaDepthLimit,
+        maxPrefixDepthThisIda: args.metrics.maxPrefixDepthThisIda,
+        transposePrunes: args.metrics.transposePrunes,
+        pathCyclePrunes: args.metrics.pathCyclePrunes,
+        frequentPrunes: topPruneEntries(args.metrics.pruneByKey)
       });
     }
 

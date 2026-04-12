@@ -126,6 +126,17 @@ export function affectedIndicesForMove(move: MoveName): Set<number> {
   return AFFECTED_BY_MOVE.get(move) ?? new Set<number>();
 }
 
+/** Обратный ход (R↔R', R2↔R2). Немедленный X после X⁻¹ не нужен в кратчайшем поиске. */
+export function inverseMove(move: MoveName): MoveName {
+  if (move.endsWith("2")) {
+    return move;
+  }
+  if (move.endsWith("'")) {
+    return move.slice(0, -1) as MoveName;
+  }
+  return `${move}'` as MoveName;
+}
+
 export function applyMove(state: CubeState, move: MoveName): CubeState {
   const permutation = PERMUTATION_BY_MOVE.get(move);
   if (!permutation) {

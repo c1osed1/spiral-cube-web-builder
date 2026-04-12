@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import { FACE_ORDER, FACE_SIZE, type CubeState, type StickerColor } from "../solver/types";
 import { getStickerPosition, netFromState } from "../solver/state";
+import { buildFaceDominoes, buildSameFaceBondLines, cellKey } from "./cubeDomino";
 
 interface CubeViewProps {
   state: CubeState | null;
@@ -28,17 +30,26 @@ export function CubeView({
   onBondDragEnd
 }: CubeViewProps): JSX.Element {
   if (!state) {
-    return <div className="panel">Куб не загружен.</div>;
+    return (
+      <div className="rounded-xl border border-white/[0.08] bg-slate-950/50 px-4 py-6 text-center text-sm text-slate-400">
+        Куб не загружен.
+      </div>
+    );
   }
 
   const net = netFromState(state);
-  const bondsByFace = buildFaceBondLines(state);
+  const { slaves, dominoes, dominoPairKeys } = buildFaceDominoes(state);
+  const bondsByFace = buildSameFaceBondLines(state, dominoPairKeys);
   const bondedStickerKeys = new Set<string>();
   for (const [a, b] of state.bonds) {
-    const pa = getStickerPosition(a);
-    const pb = getStickerPosition(b);
-    bondedStickerKeys.add(`${pa.face}-${pa.row}-${pa.col}`);
-    bondedStickerKeys.add(`${pb.face}-${pb.row}-${pb.col}`);
+    try {
+      const pa = getStickerPosition(a);
+      const pb = getStickerPosition(b);
+      bondedStickerKeys.add(cellKey(pa.face, pa.row, pa.col));
+      bondedStickerKeys.add(cellKey(pb.face, pb.row, pb.col));
+    } catch {
+      /* пропускаем битый индекс */
+    }
   }
 
   return (
@@ -47,29 +58,60 @@ export function CubeView({
         <section key={face} className="face-block">
           <header>{face}</header>
           <div className="face-wrap">
-            <div className="face-grid" style={{ gridTemplateColumns: `repeat(${FACE_SIZE}, 1fr)` }}>
-              {net[face].flat().map((color, idx) => {
+            <div
+              className="face-grid face-grid-explicit"
+              style={{
+                gridTemplateColumns: `repeat(${FACE_SIZE}, 1fr)`,
+                gridTemplateRows: `repeat(${FACE_SIZE}, 1fr)`
+              }}
+            >
+              {Array.from({ length: FACE_SIZE * FACE_SIZE }, (_, idx) => {
                 const row = Math.floor(idx / FACE_SIZE);
                 const col = idx % FACE_SIZE;
-                const bonded = bondedStickerKeys.has(`${face}-${row}-${col}`);
+                const color = net[face][row][col];
+                const ck = cellKey(face, row, col);
+                if (slaves.has(ck)) {
+                  return null;
+                }
                 const absoluteIndex = FACE_ORDER.indexOf(face) * FACE_SIZE * FACE_SIZE + idx;
-                const selected = selectedIndex === absoluteIndex;
-                const dragStart = bondDragStartIndex === absoluteIndex;
+                const dom = dominoes.get(ck);
+                const bonded = bondedStickerKeys.has(ck);
+                const selected =
+                  selectedIndex === absoluteIndex ||
+                  (dom !== undefined &&
+                    (selectedIndex === dom.primaryIndex || selectedIndex === dom.secondaryIndex));
+                const dragStart =
+                  bondDragStartIndex === absoluteIndex ||
+                  (dom !== undefined &&
+                    (bondDragStartIndex === dom.primaryIndex || bondDragStartIndex === dom.secondaryIndex));
+
+                const gridStyle: CSSProperties = dom
+                  ? {
+                      gridRow: `${row + 1} / span ${dom.spanRows}`,
+                      gridColumn: `${col + 1} / span ${dom.spanCols}`
+                    }
+                  : {
+                      gridRow: row + 1,
+                      gridColumn: col + 1
+                    };
+
+                const clickIndex = dom ? dom.primaryIndex : absoluteIndex;
+
                 return (
                   <button
-                    key={`${face}-${idx}`}
+                    key={`${face}-${row}-${col}`}
                     type="button"
-                    className={`sticker ${bonded ? "sticker-bonded" : ""} ${selected ? "sticker-selected" : ""} ${dragStart ? "sticker-drag-start" : ""}`}
-                    style={{ backgroundColor: COLOR_MAP[color] }}
-                    title={`${face}:${idx}`}
-                    onClick={() => onStickerClick?.(absoluteIndex)}
+                    className={`sticker sticker-domino ${dom ? "sticker-domino-merged" : ""} ${bonded ? "sticker-bonded" : ""} ${selected ? "sticker-selected" : ""} ${dragStart ? "sticker-drag-start" : ""}`}
+                    style={{ ...gridStyle, backgroundColor: COLOR_MAP[color] }}
+                    title={dom ? `${face}:${dom.primaryIndex}+${dom.secondaryIndex}` : `${face}:${idx}`}
+                    onClick={() => onStickerClick?.(clickIndex)}
                     onMouseDown={(event) => {
                       if (event.button !== 0) {
                         return;
                       }
-                      onBondDragStart?.(absoluteIndex);
+                      onBondDragStart?.(clickIndex);
                     }}
-                    onMouseUp={() => onBondDragEnd?.(absoluteIndex)}
+                    onMouseUp={() => onBondDragEnd?.(clickIndex)}
                     onDragStart={(event) => event.preventDefault()}
                   />
                 );
@@ -92,38 +134,4 @@ export function CubeView({
       ))}
     </div>
   );
-}
-
-interface BondLine {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-
-function buildFaceBondLines(state: CubeState): Record<(typeof FACE_ORDER)[number], BondLine[]> {
-  const lines = Object.fromEntries(FACE_ORDER.map((face) => [face, [] as BondLine[]])) as Record<
-    (typeof FACE_ORDER)[number],
-    BondLine[]
-  >;
-
-  for (const [a, b] of state.bonds) {
-    const pa = getStickerPosition(a);
-    const pb = getStickerPosition(b);
-    if (pa.face !== pb.face) {
-      continue;
-    }
-    lines[pa.face].push({
-      x1: toSvgCoord(pa.col),
-      y1: toSvgCoord(pa.row),
-      x2: toSvgCoord(pb.col),
-      y2: toSvgCoord(pb.row)
-    });
-  }
-
-  return lines;
-}
-
-function toSvgCoord(cell: number): number {
-  return ((cell + 0.5) / FACE_SIZE) * 100;
 }

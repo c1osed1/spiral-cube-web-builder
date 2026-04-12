@@ -27,8 +27,8 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
   }
 
   return (
-    <div className="panel solver-settings">
-      <h2>Настройки поиска</h2>
+    <div className="solver-settings">
+      <h2 className="mb-1 text-lg font-semibold text-white">Настройки поиска</h2>
       <p className="hint">
         Полный поиск (complete) может идти очень долго. «Безлимит по времени» — только для полного режима: браузер не
         остановит по таймеру (остановите вручную «Стоп»).
@@ -38,6 +38,7 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
         <label>
           Стратегия
           <select
+            className="mt-0.5"
             value={value.strategy ?? "complete"}
             disabled={disabled}
             onChange={(e) => patch("strategy", e.target.value as "beam" | "complete")}
@@ -131,9 +132,9 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
         </label>
       </div>
 
-      <div className="actions">
-        <button type="button" disabled={disabled} onClick={() => onChange({ ...DEFAULT_SOLVER_SETTINGS })}>
-          Сбросить настройки по умолчанию
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" className="ui-btn-secondary" disabled={disabled} onClick={() => onChange({ ...DEFAULT_SOLVER_SETTINGS })}>
+          Сбросить по умолчанию
         </button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import snapshot from "../../spyral4-assembly.json";
 import { cubieAffectedCountForTest, isMoveBandageLegal, legalMoves, resolveBondModel } from "./bandage";
-import { applyMove } from "./moves";
+import { applyMove, inverseMove } from "./moves";
 import { solveState } from "./search";
 import { isSolved, parseSnapshotFile, stateFromSnapshot } from "./state";
 import type { MoveName } from "./types";
@@ -16,6 +16,13 @@ describe("snapshot parser", () => {
 });
 
 describe("move invariants", () => {
+  test("inverseMove pairs quarter turns", () => {
+    expect(inverseMove("R")).toBe("R'");
+    expect(inverseMove("R'")).toBe("R");
+    expect(inverseMove("R2")).toBe("R2");
+    expect(inverseMove("Uw")).toBe("Uw'");
+  });
+
   test("face move and inverse restore same state", () => {
     const state = stateFromSnapshot(parseSnapshotFile(snapshot));
     const moved = applyMove(state, "R");

@@ -1,6 +1,8 @@
+import type { CSSProperties } from "react";
 import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { getStickerPosition, netFromState } from "../solver/state";
+import { netFromState } from "../solver/state";
 import { FACE_ORDER, FACE_SIZE, type CubeState, type FaceName, type StickerColor } from "../solver/types";
+import { buildFaceDominoes, buildSameFaceBondLines, cellKey, type BondLineSvg, type FaceDomino } from "./cubeDomino";
 
 interface Cube3DViewProps {
   state: CubeState | null;
@@ -25,7 +27,23 @@ export function Cube3DView({ state }: Cube3DViewProps): JSX.Element {
   );
 
   const net = useMemo(() => (state ? netFromState(state) : null), [state]);
-  const faceBonds = useMemo(() => (state ? buildFaceBondDecor(state) : null), [state]);
+  const layoutPack = useMemo(() => {
+    if (!state) {
+      return null;
+    }
+    const dominoPack = buildFaceDominoes(state);
+    const bondLinesByFace = buildSameFaceBondLines(state, dominoPack.dominoPairKeys);
+    return { dominoPack, bondLinesByFace };
+  }, [state]);
+  const bondedBySticker = useMemo(() => {
+    if (!state) return null;
+    const s = new Set<number>();
+    for (const [a, b] of state.bonds) {
+      s.add(a);
+      s.add(b);
+    }
+    return s;
+  }, [state]);
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     setDragging(true);
@@ -59,18 +77,28 @@ export function Cube3DView({ state }: Cube3DViewProps): JSX.Element {
     event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
-  if (!state || !net) {
-    return <div className="panel">3D вид недоступен: куб не загружен.</div>;
+  if (!state || !net || !layoutPack || !bondedBySticker) {
+    return (
+      <div className="rounded-xl border border-white/[0.08] bg-slate-950/50 px-4 py-6 text-center text-sm text-slate-400">
+        3D недоступен: куб не загружен.
+      </div>
+    );
   }
+
+  const { dominoPack, bondLinesByFace } = layoutPack;
+  const { slaves, dominoes } = dominoPack;
 
   return (
     <div>
       <div className="actions">
-        <button type="button" onClick={() => {
-          setRotX(-26);
-          setRotY(34);
-          setRotZ(0);
-        }}>
+        <button
+          type="button"
+          onClick={() => {
+            setRotX(-26);
+            setRotY(34);
+            setRotZ(0);
+          }}
+        >
           Сбросить ракурс
         </button>
       </div>
@@ -82,15 +110,63 @@ export function Cube3DView({ state }: Cube3DViewProps): JSX.Element {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="cube3d" style={{ transform: `rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg)` }}>
-          <Face sideClass="cube3d-front" stickers={net.F.flat()} label="F" bonded={faceBonds?.F.bonded ?? new Set()} lines={faceBonds?.F.lines ?? []} />
-          <Face sideClass="cube3d-back" stickers={net.B.flat()} label="B" bonded={faceBonds?.B.bonded ?? new Set()} lines={faceBonds?.B.lines ?? []} />
-          <Face sideClass="cube3d-right" stickers={net.R.flat()} label="R" bonded={faceBonds?.R.bonded ?? new Set()} lines={faceBonds?.R.lines ?? []} />
-          <Face sideClass="cube3d-left" stickers={net.L.flat()} label="L" bonded={faceBonds?.L.bonded ?? new Set()} lines={faceBonds?.L.lines ?? []} />
-          <Face sideClass="cube3d-top" stickers={net.U.flat()} label="U" bonded={faceBonds?.U.bonded ?? new Set()} lines={faceBonds?.U.lines ?? []} />
-          <Face sideClass="cube3d-bottom" stickers={net.D.flat()} label="D" bonded={faceBonds?.D.bonded ?? new Set()} lines={faceBonds?.D.lines ?? []} />
+          <Face
+            sideClass="cube3d-front"
+            face="F"
+            stickers={net.F.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.F}
+            bonded={bondedBySticker}
+          />
+          <Face
+            sideClass="cube3d-back"
+            face="B"
+            stickers={net.B.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.B}
+            bonded={bondedBySticker}
+          />
+          <Face
+            sideClass="cube3d-right"
+            face="R"
+            stickers={net.R.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.R}
+            bonded={bondedBySticker}
+          />
+          <Face
+            sideClass="cube3d-left"
+            face="L"
+            stickers={net.L.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.L}
+            bonded={bondedBySticker}
+          />
+          <Face
+            sideClass="cube3d-top"
+            face="U"
+            stickers={net.U.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.U}
+            bonded={bondedBySticker}
+          />
+          <Face
+            sideClass="cube3d-bottom"
+            face="D"
+            stickers={net.D.flat()}
+            slaves={slaves}
+            dominoes={dominoes}
+            lines={bondLinesByFace.D}
+            bonded={bondedBySticker}
+          />
         </div>
       </div>
-      <p>ЛКМ + тянуть: вверх/вниз/влево/вправо. Shift + тянуть влево/вправо: прокрутка куба (roll).</p>
+      <p className="mt-2 text-sm text-slate-500">ЛКМ + тянуть. Shift + влево/вправо: roll.</p>
     </div>
   );
 }
@@ -98,33 +174,68 @@ export function Cube3DView({ state }: Cube3DViewProps): JSX.Element {
 function Face({
   stickers,
   sideClass,
-  label,
-  bonded,
-  lines
+  face,
+  slaves,
+  dominoes,
+  lines,
+  bonded
 }: {
   stickers: StickerColor[];
+  face: FaceName;
   sideClass: string;
-  label: FaceName;
+  slaves: Set<string>;
+  dominoes: Map<string, FaceDomino>;
+  lines: BondLineSvg[];
   bonded: Set<number>;
-  lines: BondLine[];
 }): JSX.Element {
-  const baseOffset = FACE_ORDER.indexOf(label) * FACE_SIZE * FACE_SIZE;
+  const baseOffset = FACE_ORDER.indexOf(face) * FACE_SIZE * FACE_SIZE;
+
   return (
     <div className={`cube3d-face ${sideClass}`}>
-      <div className="cube3d-label">{label}</div>
+      <div className="cube3d-label">{face}</div>
       <div className="cube3d-face-wrap">
-      <div className="cube3d-grid">
-        {stickers.map((color, idx) => (
-          <span
-            key={`${label}-${idx}`}
-            className={`cube3d-sticker ${bonded.has(baseOffset + idx) ? "cube3d-sticker-bonded" : ""}`}
-            style={{ backgroundColor: COLOR_MAP[color] }}
-          />
-        ))}
-      </div>
+        <div
+          className="cube3d-grid cube3d-grid-explicit"
+          style={{
+            gridTemplateColumns: `repeat(${FACE_SIZE}, 1fr)`,
+            gridTemplateRows: `repeat(${FACE_SIZE}, 1fr)`
+          }}
+        >
+          {Array.from({ length: FACE_SIZE * FACE_SIZE }, (_, idx) => {
+            const row = Math.floor(idx / FACE_SIZE);
+            const col = idx % FACE_SIZE;
+            const color = stickers[row * FACE_SIZE + col];
+            const ck = cellKey(face, row, col);
+            if (slaves.has(ck)) {
+              return null;
+            }
+            const absoluteIndex = baseOffset + idx;
+            const dom = dominoes.get(ck);
+            const gridStyle: CSSProperties = dom
+              ? {
+                  gridRow: `${row + 1} / span ${dom.spanRows}`,
+                  gridColumn: `${col + 1} / span ${dom.spanCols}`
+                }
+              : {
+                  gridRow: row + 1,
+                  gridColumn: col + 1
+                };
+            const isBonded =
+              bonded.has(absoluteIndex) ||
+              (dom !== undefined && (bonded.has(dom.primaryIndex) || bonded.has(dom.secondaryIndex)));
+
+            return (
+              <span
+                key={`${face}-${row}-${col}`}
+                className={`cube3d-sticker cube3d-sticker-domino ${dom ? "cube3d-sticker-domino-merged" : ""} ${isBonded ? "cube3d-sticker-bonded" : ""}`}
+                style={{ ...gridStyle, backgroundColor: COLOR_MAP[color] }}
+              />
+            );
+          })}
+        </div>
         <svg className="cube3d-bond-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
           {lines.map((line, idx) => (
-            <line key={`${label}-line-${idx}`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} className="cube3d-bond-line" />
+            <line key={`${face}-line-${idx}`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} className="cube3d-bond-line" />
           ))}
         </svg>
       </div>
@@ -134,47 +245,4 @@ function Face({
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-interface BondLine {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-
-function buildFaceBondDecor(
-  state: CubeState
-): Record<FaceName, { lines: BondLine[]; bonded: Set<number> }> {
-  const initial = Object.fromEntries(
-    FACE_ORDER.map((face) => [face, { lines: [] as BondLine[], bonded: new Set<number>() }])
-  ) as Record<FaceName, { lines: BondLine[]; bonded: Set<number> }>;
-
-  for (const [a, b] of state.bonds) {
-    let pa: { face: FaceName; row: number; col: number };
-    let pb: { face: FaceName; row: number; col: number };
-    try {
-      pa = getStickerPosition(a);
-      pb = getStickerPosition(b);
-    } catch {
-      continue;
-    }
-    initial[pa.face].bonded.add(a);
-    initial[pb.face].bonded.add(b);
-    if (pa.face !== pb.face) {
-      continue;
-    }
-    initial[pa.face].lines.push({
-      x1: toSvgCoord(pa.col),
-      y1: toSvgCoord(pa.row),
-      x2: toSvgCoord(pb.col),
-      y2: toSvgCoord(pb.row)
-    });
-  }
-
-  return initial;
-}
-
-function toSvgCoord(cell: number): number {
-  return ((cell + 0.5) / FACE_SIZE) * 100;
 }

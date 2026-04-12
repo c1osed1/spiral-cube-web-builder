@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import snapshotData from "../spyral4-assembly.json";
 import doneData from "../done.json";
 import { stateAtStep } from "./solver/playback";
@@ -15,15 +16,18 @@ import {
   type SnapshotFile,
   type StickerColor
 } from "./solver/types";
-import { CubeView } from "./ui/CubeView";
 import { SolverPanel } from "./ui/SolverPanel";
 import { Cube3DView } from "./ui/Cube3DView";
+import { PageBackdrop } from "./ui/PageBackdrop";
+import { SpotlightCard } from "./ui/SpotlightCard";
+import { ShinyText } from "./ui/react-bits/ShinyText";
+import { JsonMonacoPanel } from "./ui/JsonMonacoPanel";
+import { CubePaintWorkbench } from "./ui/CubePaintWorkbench";
 import { DEFAULT_SOLVER_SETTINGS, SolverSettings, toWorkerSearchOptions, type SolverSettingsForm } from "./ui/SolverSettings";
 import type { WorkerEvent, WorkerRequest, WorkerSolveRequest } from "./ui/types";
 
 const defaultSnapshot = parseSnapshotFile(snapshotData);
 const defaultTargetSnapshot = parseSnapshotFile(doneData);
-const PALETTE: StickerColor[] = ["W", "Y", "R", "O", "G", "B"];
 const CONFIGS_STORAGE_KEY = "cubev1_saved_configs";
 const SOLVED_FACE_COLORS: Record<FaceName, StickerColor> = {
   U: "W",
@@ -404,163 +408,131 @@ function App(): JSX.Element {
     }
   }
 
-  const selectedLabel = selectedSticker !== null ? stickerLabel(selectedSticker) : "-";
-  const dragFromLabel = bondDragStartIndex !== null ? stickerLabel(bondDragStartIndex) : "-";
+  const gridContainer = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.05, delayChildren: 0.08 }
+    }
+  } as const;
+
+  const gridItem = {
+    hidden: { opacity: 0, y: 18 },
+    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 380, damping: 26 } }
+  } as const;
 
   return (
-    <main className="layout">
-      <section className="panel">
-        <h1>Солвер бандажного 4x4 Spiral</h1>
-        <p>Загрузите/измените JSON снимка, запустите поиск к целевому состоянию и просматривайте шаги решения.</p>
-        <textarea value={snapshotText} onChange={(event) => setSnapshotText(event.target.value)} rows={16} />
-        <div className="actions">
-          <button onClick={applySnapshotFromText}>Применить JSON</button>
-          <button onClick={() => setTargetSnapshot(parseSnapshotFile(doneData))}>Цель: done.json</button>
-          <button onClick={() => setTargetSnapshot(snapshot)}>Цель: текущий JSON</button>
-        </div>
-        <p>Текущая цель: {targetSnapshot.savedAt}</p>
-        {error ? <p className="error">{error}</p> : null}
-      </section>
-
-      <section className="panel">
-        <h2>Визуальный редактор JSON</h2>
-        <div className="editor-grid">
-          <p>Выбранный стикер: {selectedLabel}</p>
-          <p>Тянем бандаж от: {dragFromLabel}</p>
-          <p>Режим окрашивания: {paintMode ? "включен" : "выключен"} (текущий цвет {activePaintColor})</p>
-          <p>Зажмите левую кнопку на стикере и протяните к другому, чтобы создать или снять бандаж (вне режима окрашивания).</p>
-          <div className="palette">
-            {PALETTE.map((color) => (
-              <button
-                key={color}
-                type="button"
-                className={`chip ${activePaintColor === color ? "active" : ""}`}
-                onClick={() => selectPaintColor(color)}
-              >
-                Красить в {color}
-              </button>
-            ))}
+    <div className="relative min-h-screen font-sans">
+      <PageBackdrop />
+      <main className="relative z-10 mx-auto max-w-[1680px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">
+        <motion.header
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="mb-10 text-center lg:mb-14 lg:text-left"
+        >
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-violet-300/90">
+            spiral-cube-web-builder
+          </p>
+          <h1 className="bg-gradient-to-br from-white via-violet-100 to-sky-200 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl lg:text-5xl">
+            Бандажный 4×4 Spiral
+          </h1>
+          <div className="mx-auto mt-3 max-w-2xl text-pretty lg:mx-0">
+            <ShinyText
+              text="JSON → солвер в Web Worker → пошаговый playback. Визуальный редактор, связи и 3D."
+              className="text-base sm:text-lg"
+              color="#94a3b8"
+              shineColor="#f1f5f9"
+              speed={2.8}
+              spread={110}
+            />
           </div>
-          <div className="actions">
-            <button type="button" onClick={() => setPaintMode((v) => !v)}>
-              {paintMode ? "Выключить режим окрашивания" : "Включить режим окрашивания"}
-            </button>
-            <button type="button" onClick={paintAllFacesSolvedColors}>
-              Покрасить все стороны в базовые цвета
-            </button>
-            <button type="button" onClick={resetEditorFromAppliedJson}>
-              Откатить редактор к примененному JSON
-            </button>
-            <button type="button" onClick={applyEditorToJson}>
-              Применить редактор в JSON
-            </button>
-          </div>
-          <div className="log">
-            {editorSnapshot.bonds.length === 0
-              ? "(бандажей нет)"
-              : editorSnapshot.bonds
-                  .map(
-                    ([a, b], idx) =>
-                      `${idx + 1}. ${stickerLabel(a)} <-> ${stickerLabel(b)}`
-                  )
-                  .join("\n")}
-          </div>
-          <div className="bond-list">
-            {editorSnapshot.bonds.map(([a, b], idx) => (
-              <div key={`${a}-${b}-${idx}`} className="bond-row">
-                <span>
-                  {idx + 1}. {stickerLabel(a)} {" <-> "} {stickerLabel(b)}
-                </span>
-                <button type="button" className="chip" onClick={() => removeBond(idx)}>
-                  Удалить
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+        </motion.header>
 
-      <section className="panel">
-        <h2>История конфигов</h2>
-        <div className="editor-grid">
-          <input
-            value={configNameDraft}
-            onChange={(event) => setConfigNameDraft(event.target.value)}
-            placeholder="Название конфига"
-          />
-          <div className="actions">
-            <button type="button" onClick={createEmptyConfig}>
-              Сохранить как новый
-            </button>
-            <button type="button" onClick={updateSelectedConfig} disabled={!selectedConfigId}>
-              Обновить выбранный
-            </button>
-            <button type="button" onClick={loadSelectedConfig} disabled={!selectedConfigId}>
-              Загрузить выбранный
-            </button>
-            <button type="button" onClick={deleteSelectedConfig} disabled={!selectedConfigId}>
-              Удалить выбранный
-            </button>
-          </div>
-          <div className="bond-list">
-            {savedConfigs.length === 0 ? (
-              <p>Сохраненных конфигов пока нет.</p>
-            ) : (
-              savedConfigs.map((cfg) => (
-                <button
-                  type="button"
-                  key={cfg.id}
-                  className={`chip ${selectedConfigId === cfg.id ? "active" : ""}`}
-                  onClick={() => selectConfig(cfg.id)}
-                >
-                  {cfg.name} ({new Date(cfg.updatedAt).toLocaleString("ru-RU")})
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      </section>
+        <motion.div
+          className="grid gap-6 lg:grid-cols-2 xl:grid-cols-12 xl:gap-7"
+          variants={gridContainer}
+          initial="hidden"
+          animate="show"
+        >
+          <motion.div variants={gridItem} className="xl:col-span-12">
+            <JsonMonacoPanel
+              value={snapshotText}
+              onChange={setSnapshotText}
+              onApply={applySnapshotFromText}
+              onTargetDone={() => setTargetSnapshot(parseSnapshotFile(doneData))}
+              onTargetCurrent={() => setTargetSnapshot(snapshot)}
+              targetSavedAt={targetSnapshot.savedAt}
+              error={error}
+            />
+          </motion.div>
 
-      <SolverSettings value={solverSettings} onChange={setSolverSettings} disabled={running} />
+          <motion.div variants={gridItem} className="xl:col-span-12">
+            <CubePaintWorkbench
+              visibleState={visibleState}
+              editorSnapshot={editorSnapshot}
+              snapshot={snapshot}
+              selectedSticker={selectedSticker}
+              bondDragStartIndex={bondDragStartIndex}
+              paintMode={paintMode}
+              activePaintColor={activePaintColor}
+              onStickerInteract={onStickerInteract}
+              onBondDragStart={onBondDragStart}
+              onBondDragEnd={onBondDragEnd}
+              onTogglePaintMode={() => setPaintMode((v) => !v)}
+              onSelectPaintColor={selectPaintColor}
+              onPaintAllSolved={paintAllFacesSolvedColors}
+              onResetFromAppliedJson={resetEditorFromAppliedJson}
+              onPushEditorToJson={applyEditorToJson}
+              onRemoveBond={removeBond}
+              formatSticker={stickerLabel}
+              savedConfigs={savedConfigs}
+              selectedConfigId={selectedConfigId}
+              configNameDraft={configNameDraft}
+              onConfigNameDraft={setConfigNameDraft}
+              onCreateConfig={createEmptyConfig}
+              onUpdateConfig={updateSelectedConfig}
+              onLoadConfig={loadSelectedConfig}
+              onDeleteConfig={deleteSelectedConfig}
+              onSelectConfig={selectConfig}
+            />
+          </motion.div>
 
-      <SolverPanel
-        running={running}
-        progress={progress}
-        result={result}
-        onStart={startSolver}
-        onStop={stopSolver}
-        playbackStep={playbackStep}
-        playbackMax={solutionMoves.length}
-        onStepChange={onManualStepChange}
-        solutionMoves={solutionMoves}
-        isAnimating={isAnimating}
-        playbackSpeedMs={playbackSpeedMs}
-        onToggleAnimation={toggleAnimation}
-        onResetPlayback={resetPlayback}
-        onPlaybackSpeedChange={setPlaybackSpeedMs}
-        legalMovesNow={visibleLegalMoves}
-      />
+          <motion.div variants={gridItem} className="xl:col-span-7">
+            <SpotlightCard className="h-full">
+              <SolverSettings value={solverSettings} onChange={setSolverSettings} disabled={running} />
+            </SpotlightCard>
+          </motion.div>
 
-      <section className="panel">
-        <h2>Вид куба</h2>
-        <p>
-          Версия снимка: {snapshot.v}, сохранен: {snapshot.savedAt}
-        </p>
-        <CubeView
-          state={visibleState}
-          selectedIndex={selectedSticker}
-          onStickerClick={onStickerInteract}
-          bondDragStartIndex={bondDragStartIndex}
-          onBondDragStart={onBondDragStart}
-          onBondDragEnd={onBondDragEnd}
-        />
-      </section>
+          <motion.div variants={gridItem} className="xl:col-span-12">
+            <SolverPanel
+              running={running}
+              progress={progress}
+              result={result}
+              onStart={startSolver}
+              onStop={stopSolver}
+              playbackStep={playbackStep}
+              playbackMax={solutionMoves.length}
+              onStepChange={onManualStepChange}
+              solutionMoves={solutionMoves}
+              isAnimating={isAnimating}
+              playbackSpeedMs={playbackSpeedMs}
+              onToggleAnimation={toggleAnimation}
+              onResetPlayback={resetPlayback}
+              onPlaybackSpeedChange={setPlaybackSpeedMs}
+              legalMovesNow={visibleLegalMoves}
+            />
+          </motion.div>
 
-      <section className="panel">
-        <h2>3D вид куба</h2>
-        <Cube3DView state={visibleState} />
-      </section>
-    </main>
+          <motion.div variants={gridItem} className="xl:col-span-6">
+            <SpotlightCard>
+              <h2 className="mb-4 text-lg font-semibold text-white">3D</h2>
+              <Cube3DView state={visibleState} />
+            </SpotlightCard>
+          </motion.div>
+        </motion.div>
+      </main>
+    </div>
   );
 }
 

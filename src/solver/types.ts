@@ -40,6 +40,15 @@ export interface SearchOptions {
   shouldAbort?: () => boolean;
 }
 
+/** Состояние, в которое чаще всего приходили «длинным» путём и отсекали (транспозиция / beam seen). */
+export interface TransposePruneEntry {
+  /** Короткий id (хэш полного ключа состояния), не весь JSON */
+  stateId: string;
+  prunes: number;
+  /** Минимальная известная длина пути до этого состояния */
+  minKnownDepth: number;
+}
+
 export interface SearchProgress {
   elapsedMs: number;
   nodesExpanded: number;
@@ -47,6 +56,18 @@ export interface SearchProgress {
   bestScore: number;
   bestDepth: number;
   bestPath: MoveName[];
+  /** Текущий лимит глубины в iterative deepening (complete). */
+  idaDepthLimit?: number;
+  /** Максимальная длина префикса, до которой дошёл DFS в этой итерации IDA. */
+  maxPrefixDepthThisIda?: number;
+  /** Отсечено как «уже были здесь не дольше» (таблица транспозиций). */
+  transposePrunes?: number;
+  /** Отсечено: состояние уже на текущем пути (цикл). */
+  pathCyclePrunes?: number;
+  /** Beam: состояние уже было в seen. */
+  beamSeenPrunes?: number;
+  /** Топ состояний по числу отсечений (для UI «частые повторы»). */
+  frequentPrunes?: TransposePruneEntry[];
 }
 
 export interface SearchResult {
