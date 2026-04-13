@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import snapshotData from "../spyral4-assembly.json";
 import doneData from "../done.json";
@@ -25,7 +25,7 @@ import { JsonMonacoPanel } from "./ui/JsonMonacoPanel";
 import { CubePaintWorkbench } from "./ui/CubePaintWorkbench";
 import { toSearchOptions } from "./solver/solverSettingsForm";
 import { DEFAULT_SOLVER_SETTINGS, SolverSettings, type SolverSettingsForm } from "./ui/SolverSettings";
-import { runSolveNdjsonStream } from "./ui/solverApiClient";
+import { useSolverWebSocket } from "./ui/useSolverWebSocket";
 
 const defaultSnapshot = parseSnapshotFile(snapshotData);
 const defaultTargetSnapshot = parseSnapshotFile(doneData);
@@ -47,13 +47,7 @@ interface SavedCubeConfig {
 }
 
 function App(): JSX.Element {
-  const solveAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    return () => {
-      solveAbortRef.current?.abort();
-    };
-  }, []);
+  const { socketPhase, socketHint, sendSolve, sendStop } = useSolverWebSocket();
 
   const [snapshotText, setSnapshotText] = useState<string>(JSON.stringify(defaultSnapshot, null, 2));
   const [snapshot, setSnapshot] = useState<SnapshotFile>(defaultSnapshot);
@@ -153,10 +147,6 @@ function App(): JSX.Element {
     setSelectedSticker(null);
     setBondDragStartIndex(null);
 
-    solveAbortRef.current?.abort();
-    const ac = new AbortController();
-    solveAbortRef.current = ac;
-
     setError("");
     setProgress(null);
     setResult(null);
@@ -164,7 +154,7 @@ function App(): JSX.Element {
     setIsAnimating(false);
     setRunning(true);
 
-    await runSolveNdjsonStream(
+    await sendSolve(
       {
         snapshot: snap,
         targetSnapshot,
@@ -178,12 +168,10 @@ function App(): JSX.Element {
           setPlaybackStep(0);
           setIsAnimating(payload.moves.length > 0);
           setProgress((current) => current ?? null);
-          solveAbortRef.current = null;
         },
         onError: (msg) => {
           setRunning(false);
           setIsAnimating(false);
-          solveAbortRef.current = null;
           if (msg) {
             setError(msg);
           }
@@ -191,16 +179,13 @@ function App(): JSX.Element {
         onAborted: () => {
           setRunning(false);
           setIsAnimating(false);
-          solveAbortRef.current = null;
         }
-      },
-      ac.signal
+      }
     );
   }
 
   function stopSolver(): void {
-    solveAbortRef.current?.abort();
-    solveAbortRef.current = null;
+    sendStop();
     setRunning(false);
     setIsAnimating(false);
   }
@@ -507,6 +492,8 @@ function App(): JSX.Element {
           <motion.div variants={gridItem} className="xl:col-span-12">
             <SolverPanel
               running={running}
+              solverSocketReady={socketPhase === "open"}
+              solverSocketHint={socketHint}
               progress={progress}
               result={result}
               onStart={startSolver}

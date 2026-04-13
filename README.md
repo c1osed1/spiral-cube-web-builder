@@ -11,7 +11,8 @@
    - `npm install`
 3. Запустите **интерфейс и солвер** вместе (рекомендуется):
    - `npm run dev:full` — Vite + API на `http://127.0.0.1:8787`, прокси `/api` из dev-сервера.
-4. Либо в двух терминалах: `npm run server`, затем `npm run dev`.
+4. Либо в двух терминалах: `npm run server`, затем `npm run dev`.  
+   В **dev** WebSocket к солверу идёт на `ws://127.0.0.1:8787` (минуя Vite-прокси), HTTP `/api` по-прежнему через прокси.
 5. Откройте адрес Vite (обычно localhost:5173) в браузере.
 
 ## Встроенный снимок
@@ -34,7 +35,7 @@
 - `src/solver/moves.ts`: механика поворотов граней 4x4 и поиск затрагиваемых индексов.
 - `src/solver/bandage.ts`: проверки на легальность бандажей.
 - `src/solver/search.ts`: поиск (beam / полный iterative deepening), цель `done.json`, настройки из UI.
-- `server/index.ts`: HTTP API (`POST /api/solve`, NDJSON-стрим прогресса).
+- `server/index.ts`: HTTP `POST /api/solve` (NDJSON) и **WebSocket** `ws://…/api/ws/solve` (тот же префикс `/api`, что и у Vite-прокси с `ws: true`).
 - `src/solver/runSolveJob.ts`: общая точка входа для сервера (и для `solve:console`).
 - `src/ui/CubeView.tsx`: отображение сетки куба.
 - `src/ui/SolverPanel.tsx`: панель прогресса и управления проигрывателем.

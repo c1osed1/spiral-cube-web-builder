@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import snapshot from "../../spyral4-assembly.json";
 import { cubieAffectedCountForTest, isMoveBandageLegal, legalMoves, resolveBondModel } from "./bandage";
 import { applyMove, inverseMove } from "./moves";
+import { searchOptionsFromHttpBody } from "./httpSolveOptions";
 import { solveState } from "./search";
 import { isSolved, parseSnapshotFile, stateFromSnapshot } from "./state";
 import type { MoveName } from "./types";
@@ -60,7 +61,30 @@ describe("move invariants", () => {
   });
 });
 
+describe("httpSolveOptions", () => {
+  test("strips shouldAbort and other junk from JSON body", () => {
+    const o = searchOptionsFromHttpBody({
+      maxDepth: 12,
+      shouldAbort: true,
+      extra: "x"
+    } as Record<string, unknown>);
+    expect(o.maxDepth).toBe(12);
+    expect("shouldAbort" in o).toBe(false);
+  });
+});
+
 describe("search smoke", () => {
+  test("maxDepth 0 from bad JSON does not no-op (normalizes to valid depth)", async () => {
+    const state = stateFromSnapshot(parseSnapshotFile(snapshot));
+    const r = await solveState(state, null, {
+      strategy: "beam",
+      maxDepth: 0,
+      beamWidth: 80,
+      timeBudgetMs: 3000
+    });
+    expect(r.nodesExpanded).toBeGreaterThan(0);
+  });
+
   test("returns a bounded search result", async () => {
     const state = stateFromSnapshot(parseSnapshotFile(snapshot));
     const result = await solveState(state, null, { beamWidth: 50, maxDepth: 4, timeBudgetMs: 2000 });

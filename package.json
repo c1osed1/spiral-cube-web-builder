@@ -16,6 +16,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "ws": "^8.18.0",
     "@fontsource-variable/outfit": "^5.2.8",
     "@monaco-editor/react": "^4.7.0",
     "monaco-editor": "^0.55.1",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/ws": "^8.5.13",
     "concurrently": "^9.1.2",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.5",

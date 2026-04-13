@@ -4,6 +4,10 @@ import { ScanlineOverlay } from "./ScanlineOverlay";
 
 interface SolverPanelProps {
   running: boolean;
+  /** Постоянный WS к солверу открыт и готов принять solve. */
+  solverSocketReady: boolean;
+  /** Подсказка под кнопками, пока сокет не open или ошибка сети. */
+  solverSocketHint: string;
   progress: SearchProgress | null;
   result: SearchResult | null;
   onStart: () => void;
@@ -23,6 +27,8 @@ interface SolverPanelProps {
 export function SolverPanel(props: SolverPanelProps): JSX.Element {
   const {
     running,
+    solverSocketReady,
+    solverSocketHint,
     progress,
     result,
     onStart,
@@ -81,14 +87,15 @@ export function SolverPanel(props: SolverPanelProps): JSX.Element {
               Лучшая глубина — длина лучшего по score префикса. Лимит IDA — текущий потолок итерации полного поиска.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-wrap gap-2">
             <motion.button
               type="button"
               className="ui-btn"
               onClick={onStart}
-              disabled={running}
-              whileTap={{ scale: running ? 1 : 0.97 }}
-              whileHover={{ scale: running ? 1 : 1.02 }}
+              disabled={running || !solverSocketReady}
+              whileTap={{ scale: running || !solverSocketReady ? 1 : 0.97 }}
+              whileHover={{ scale: running || !solverSocketReady ? 1 : 1.02 }}
             >
               Старт
             </motion.button>
@@ -101,6 +108,10 @@ export function SolverPanel(props: SolverPanelProps): JSX.Element {
             >
               Стоп
             </motion.button>
+            </div>
+            {solverSocketHint ? (
+              <p className="max-w-xs text-right text-[11px] text-slate-500">{solverSocketHint}</p>
+            ) : null}
           </div>
         </div>
 

@@ -28,6 +28,37 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   bondMode: "auto"
 };
 
+function clampInt(n: unknown, fallback: number, min: number, max: number): number {
+  const x = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(x)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.floor(x)));
+}
+
+/** Защита от API/JSON: maxDepth 0 / NaN / null даёт пустой цикл и «мгновенный» depth_limit без узлов. */
+function normalizeSearchOptions(input: SearchOptions): SearchOptions {
+  const unlimited = Boolean(input.unlimitedTime);
+  return {
+    beamWidth: clampInt(input.beamWidth, DEFAULT_SEARCH_OPTIONS.beamWidth, 2, 50_000),
+    maxDepth: clampInt(input.maxDepth, DEFAULT_SEARCH_OPTIONS.maxDepth, 1, 500),
+    timeBudgetMs: unlimited
+      ? 0
+      : clampInt(input.timeBudgetMs, DEFAULT_SEARCH_OPTIONS.timeBudgetMs, 1000, 1_000_000_000),
+    progressEveryExpansions: clampInt(
+      input.progressEveryExpansions,
+      DEFAULT_SEARCH_OPTIONS.progressEveryExpansions,
+      1,
+      50_000
+    ),
+    strategy: input.strategy === "complete" ? "complete" : "beam",
+    searchUntilSolved: Boolean(input.searchUntilSolved),
+    unlimitedTime: unlimited,
+    bondMode: input.bondMode ?? "auto",
+    shouldAbort: typeof input.shouldAbort === "function" ? input.shouldAbort : undefined
+  };
+}
+
 const MAX_PRUNE_MAP_KEYS = 2500;
 const TOP_PRUNE_UI = 14;
 
@@ -100,7 +131,7 @@ async function yieldIfNeeded(
     return first;
   }
   const chunk = cfg.progressEveryExpansions ?? DEFAULT_SEARCH_OPTIONS.progressEveryExpansions;
-  if (!cfg.shouldAbort || nodesExpanded === 0 || nodesExpanded % chunk !== 0) {
+  if (typeof cfg.shouldAbort !== "function" || nodesExpanded === 0 || nodesExpanded % chunk !== 0) {
     return "ok";
   }
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -113,10 +144,10 @@ export async function solveState(
   options: Partial<SearchOptions> = {},
   onProgress?: (progress: SearchProgress) => void
 ): Promise<SearchResult> {
-  const cfg = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const cfg = normalizeSearchOptions({ ...DEFAULT_SEARCH_OPTIONS, ...options });
   const startedAt = performance.now();
 
-  if (cfg.shouldAbort) {
+  if (typeof cfg.shouldAbort === "function") {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (cfg.shouldAbort()) {
       return makeResult(false, "aborted", [], performance.now() - startedAt, 0);
@@ -179,7 +210,7 @@ async function solveStateBeam(
   }
 
   for (let depth = 0; depth < cfg.maxDepth; depth += 1) {
-    if (cfg.shouldAbort) {
+    if (typeof cfg.shouldAbort === "function") {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const st = checkSearchStop(cfg, startedAt);
       if (st === "abort") {
@@ -293,7 +324,7 @@ async function solveStateComplete(
   const depthEnd = cfg.searchUntilSolved ? Number.MAX_SAFE_INTEGER : cfg.maxDepth;
 
   for (let depthLimit = depthStart; depthLimit <= depthEnd; depthLimit += 1) {
-    if (cfg.shouldAbort) {
+    if (typeof cfg.shouldAbort === "function") {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const st = checkSearchStop(cfg, startedAt);
       if (st === "abort") {

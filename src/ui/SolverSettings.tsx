@@ -25,8 +25,9 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
     <div className="solver-settings">
       <h2 className="mb-1 text-lg font-semibold text-white">Настройки поиска</h2>
       <p className="hint">
-        Поиск выполняется на локальном Node-сервере (<code className="text-slate-400">npm run server</code> или{" "}
-        <code className="text-slate-400">npm run dev:full</code>), не во вкладке. Полный режим может идти долго;
+        Поиск на Node (<code className="text-slate-400">npm run server</code> /{" "}
+        <code className="text-slate-400">npm run dev:full</code>): прогресс по WebSocket{" "}
+        <code className="text-slate-400">/api/ws/solve</code>. Полный режим может идти долго;
         «Безлимит по времени» — остановите вручную «Стоп».
       </p>
 
