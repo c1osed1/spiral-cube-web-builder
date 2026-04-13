@@ -13,7 +13,9 @@ import type {
 
 interface SearchNode {
   state: CubeState;
-  path: MoveName[];
+  parent?: SearchNode;
+  move?: MoveName;
+  depth: number;
   score: number;
 }
 
@@ -82,6 +84,18 @@ function compactStateId(serialized: string): string {
     h = Math.imul(h, 16777619) >>> 0;
   }
   return h.toString(16).padStart(8, "0");
+}
+
+function materializePath(node: SearchNode): MoveName[] {
+  const path: MoveName[] = new Array(node.depth);
+  let cursor: SearchNode | undefined = node;
+  let idx = node.depth - 1;
+  while (cursor && cursor.depth > 0) {
+    path[idx] = cursor.move as MoveName;
+    cursor = cursor.parent;
+    idx -= 1;
+  }
+  return path;
 }
 
 function recordPruneHit(
@@ -190,7 +204,9 @@ async function solveStateBeam(
   let frontier: SearchNode[] = [
     {
       state: initialState,
-      path: [],
+      parent: undefined,
+      move: undefined,
+      depth: 0,
       score: evaluateState(initialState, targetStickers, targetBondKey)
     }
   ];
@@ -214,7 +230,8 @@ async function solveStateBeam(
   function emitProgress(frontierSize: number, force = false): void {
     if (!onProgress) return;
     const now = performance.now();
-    const sig = `${bestNode.score}\u0000${bestNode.path.join("\u0001")}\u0000${bestNode.path.length}`;
+    const bestPath = materializePath(bestNode);
+    const sig = `${bestNode.score}\u0000${bestPath.join("\u0001")}\u0000${bestPath.length}`;
     if (!force && sig === lastEmitSig && now - lastEmitAt < PROGRESS_DEDUPE_MS) {
       return;
     }
@@ -225,8 +242,8 @@ async function solveStateBeam(
       nodesExpanded,
       frontierSize,
       bestScore: bestNode.score,
-      bestDepth: bestNode.path.length,
-      bestPath: bestNode.path,
+      bestDepth: bestNode.depth,
+      bestPath,
       beamSeenPrunes,
       frequentPrunes: topPruneEntries(pruneByKey)
     });
@@ -237,49 +254,66 @@ async function solveStateBeam(
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const st = checkSearchStop(cfg, startedAt);
       if (st === "abort") {
-        return makeResult(false, "aborted", bestNode.path, performance.now() - startedAt, nodesExpanded);
+        return makeResult(
+          false,
+          "aborted",
+          materializePath(bestNode),
+          performance.now() - startedAt,
+          nodesExpanded
+        );
       }
       if (st === "timeout") {
-        return makeResult(false, "timeout", bestNode.path, performance.now() - startedAt, nodesExpanded);
+        return makeResult(
+          false,
+          "timeout",
+          materializePath(bestNode),
+          performance.now() - startedAt,
+          nodesExpanded
+        );
       }
     }
 
     const nextLayer: SearchNode[] = [];
     for (const node of frontier) {
-      const prev = node.path[node.path.length - 1];
+      const prev = node.move;
       for (const { move, nextState } of orderedChildMoves(
         node.state,
         prev,
         cfg,
         targetStickers,
         targetBondKey,
-        node.path.length
+        node.depth
       )) {
         const key = serializeState(nextState);
         if (seen.has(key)) {
           beamSeenPrunes += 1;
-          recordPruneHit(pruneByKey, key, node.path.length + 1);
+          recordPruneHit(pruneByKey, key, node.depth + 1);
           continue;
         }
         if (seen.size >= MAX_BEAM_SEEN_KEYS) {
           const elapsed = performance.now() - startedAt;
-          return makeResult(false, "memory_cap", bestNode.path, elapsed, nodesExpanded);
+          return makeResult(false, "memory_cap", materializePath(bestNode), elapsed, nodesExpanded);
         }
         seen.add(key);
 
-        const path = [...node.path, move];
         const score = evaluateState(nextState, targetStickers, targetBondKey);
-        const nextNode: SearchNode = { state: nextState, path, score };
+        const nextNode: SearchNode = {
+          state: nextState,
+          parent: node,
+          move,
+          depth: node.depth + 1,
+          score
+        };
         nextLayer.push(nextNode);
         nodesExpanded += 1;
 
-        if (score < bestNode.score || (score === bestNode.score && path.length < bestNode.path.length)) {
+        if (score < bestNode.score || (score === bestNode.score && nextNode.depth < bestNode.depth)) {
           bestNode = nextNode;
         }
 
         if (isGoalState(nextState, targetKey)) {
           const solvedElapsed = performance.now() - startedAt;
-          return makeResult(true, "solved", path, solvedElapsed, nodesExpanded);
+          return makeResult(true, "solved", materializePath(nextNode), solvedElapsed, nodesExpanded);
         }
 
         if (nodesExpanded % cfg.progressEveryExpansions === 0) {
@@ -288,26 +322,38 @@ async function solveStateBeam(
 
         const y = await yieldIfNeeded(cfg, startedAt, nodesExpanded);
         if (y === "abort") {
-          return makeResult(false, "aborted", bestNode.path, performance.now() - startedAt, nodesExpanded);
+          return makeResult(
+            false,
+            "aborted",
+            materializePath(bestNode),
+            performance.now() - startedAt,
+            nodesExpanded
+          );
         }
         if (y === "timeout") {
-          return makeResult(false, "timeout", bestNode.path, performance.now() - startedAt, nodesExpanded);
+          return makeResult(
+            false,
+            "timeout",
+            materializePath(bestNode),
+            performance.now() - startedAt,
+            nodesExpanded
+          );
         }
       }
     }
 
     if (nextLayer.length === 0) {
       const endElapsed = performance.now() - startedAt;
-      return makeResult(false, "frontier_exhausted", bestNode.path, endElapsed, nodesExpanded);
+      return makeResult(false, "frontier_exhausted", materializePath(bestNode), endElapsed, nodesExpanded);
     }
 
-    nextLayer.sort((a, b) => a.score - b.score || a.path.length - b.path.length);
+    nextLayer.sort((a, b) => a.score - b.score || a.depth - b.depth);
     frontier = nextLayer.slice(0, cfg.beamWidth);
     emitProgress(frontier.length, true);
   }
 
   const totalElapsed = performance.now() - startedAt;
-  return makeResult(false, "depth_limit", bestNode.path, totalElapsed, nodesExpanded);
+  return makeResult(false, "depth_limit", materializePath(bestNode), totalElapsed, nodesExpanded);
 }
 
 interface CompleteSearchMetrics {
@@ -528,7 +574,7 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
     return { status: "timeout" };
   }
   if (isGoalState(args.state, args.targetKey)) {
-    return { status: "solved", path: args.path };
+    return { status: "solved", path: [...args.path] };
   }
   if (args.depthRemaining === 0) {
     return { status: "continue" };
@@ -549,8 +595,7 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
       continue;
     }
 
-    const nextPath = [...args.path, move];
-    const pathLen = nextPath.length;
+    const pathLen = args.path.length + 1;
     args.metrics.maxPrefixDepthThisIda = Math.max(args.metrics.maxPrefixDepthThisIda, pathLen);
 
     const prevBest = args.minPathLenByState.get(key);
@@ -564,8 +609,9 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
     }
     args.minPathLenByState.set(key, pathLen);
 
+    args.path.push(move);
     args.stats.incNodes();
-    args.stats.updateBest(evaluateState(nextState, args.targetStickers, args.targetBondKey), nextPath);
+    args.stats.updateBest(evaluateState(nextState, args.targetStickers, args.targetBondKey), args.path);
 
     if (args.stats.nodesExpanded % args.cfg.progressEveryExpansions === 0 && args.onProgress) {
       args.onProgress({
@@ -596,10 +642,10 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
       ...args,
       state: nextState,
       prevMove: move,
-      depthRemaining: args.depthRemaining - 1,
-      path: nextPath
+      depthRemaining: args.depthRemaining - 1
     });
     args.pathSet.delete(key);
+    args.path.pop();
 
     if (found.status !== "continue") {
       return found;
