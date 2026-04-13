@@ -23,8 +23,9 @@ import { SpotlightCard } from "./ui/SpotlightCard";
 import { ShinyText } from "./ui/react-bits/ShinyText";
 import { JsonMonacoPanel } from "./ui/JsonMonacoPanel";
 import { CubePaintWorkbench } from "./ui/CubePaintWorkbench";
-import { DEFAULT_SOLVER_SETTINGS, SolverSettings, toWorkerSearchOptions, type SolverSettingsForm } from "./ui/SolverSettings";
-import type { WorkerEvent, WorkerRequest, WorkerSolveRequest } from "./ui/types";
+import { toSearchOptions } from "./solver/solverSettingsForm";
+import { DEFAULT_SOLVER_SETTINGS, SolverSettings, type SolverSettingsForm } from "./ui/SolverSettings";
+import { runSolveNdjsonStream } from "./ui/solverApiClient";
 
 const defaultSnapshot = parseSnapshotFile(snapshotData);
 const defaultTargetSnapshot = parseSnapshotFile(doneData);
@@ -46,7 +47,14 @@ interface SavedCubeConfig {
 }
 
 function App(): JSX.Element {
-  const workerRef = useRef<Worker | null>(null);
+  const solveAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      solveAbortRef.current?.abort();
+    };
+  }, []);
+
   const [snapshotText, setSnapshotText] = useState<string>(JSON.stringify(defaultSnapshot, null, 2));
   const [snapshot, setSnapshot] = useState<SnapshotFile>(defaultSnapshot);
   const [editorSnapshot, setEditorSnapshot] = useState<SnapshotFile>(defaultSnapshot);
@@ -67,36 +75,6 @@ function App(): JSX.Element {
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [configNameDraft, setConfigNameDraft] = useState("Новый конфиг");
   const [solverSettings, setSolverSettings] = useState<SolverSettingsForm>(() => ({ ...DEFAULT_SOLVER_SETTINGS }));
-
-  useEffect(() => {
-    const worker = new Worker(new URL("./worker/solver.worker.ts", import.meta.url), {
-      type: "module"
-    });
-    workerRef.current = worker;
-    worker.onmessage = (event: MessageEvent<WorkerEvent>) => {
-      const message = event.data;
-      if (message.type === "progress") {
-        setProgress(message.payload);
-      } else if (message.type === "done") {
-        setRunning(false);
-        setResult(message.payload);
-        setPlaybackStep(0);
-        setIsAnimating(message.payload.moves.length > 0);
-        setProgress((current) => current ?? null);
-      } else if (message.type === "error") {
-        setRunning(false);
-        setIsAnimating(false);
-        setError(message.payload.message);
-      } else if (message.type === "stopped") {
-        setRunning(false);
-        setIsAnimating(false);
-      }
-    };
-
-    return () => {
-      worker.terminate();
-    };
-  }, []);
 
   const solutionMoves = useMemo<MoveName[]>(() => result?.moves ?? [], [result]);
   const editorState = useMemo(() => stateFromSnapshot(editorSnapshot), [editorSnapshot]);
@@ -160,10 +138,7 @@ function App(): JSX.Element {
     }
   }
 
-  function startSolver(): void {
-    if (!workerRef.current) {
-      return;
-    }
+  async function startSolver(): Promise<void> {
     let snap: SnapshotFile;
     try {
       snap = parseSnapshotFile(JSON.parse(snapshotText));
@@ -178,14 +153,9 @@ function App(): JSX.Element {
     setSelectedSticker(null);
     setBondDragStartIndex(null);
 
-    const payload: WorkerSolveRequest = {
-      type: "solve",
-      payload: {
-        snapshot: snap,
-        targetSnapshot,
-        options: toWorkerSearchOptions(solverSettings)
-      }
-    };
+    solveAbortRef.current?.abort();
+    const ac = new AbortController();
+    solveAbortRef.current = ac;
 
     setError("");
     setProgress(null);
@@ -193,14 +163,44 @@ function App(): JSX.Element {
     setPlaybackStep(0);
     setIsAnimating(false);
     setRunning(true);
-    workerRef.current.postMessage(payload);
+
+    await runSolveNdjsonStream(
+      {
+        snapshot: snap,
+        targetSnapshot,
+        options: toSearchOptions(solverSettings)
+      },
+      {
+        onProgress: (p) => setProgress(p),
+        onDone: (payload) => {
+          setRunning(false);
+          setResult(payload);
+          setPlaybackStep(0);
+          setIsAnimating(payload.moves.length > 0);
+          setProgress((current) => current ?? null);
+          solveAbortRef.current = null;
+        },
+        onError: (msg) => {
+          setRunning(false);
+          setIsAnimating(false);
+          solveAbortRef.current = null;
+          if (msg) {
+            setError(msg);
+          }
+        },
+        onAborted: () => {
+          setRunning(false);
+          setIsAnimating(false);
+          solveAbortRef.current = null;
+        }
+      },
+      ac.signal
+    );
   }
 
   function stopSolver(): void {
-    if (!workerRef.current) {
-      return;
-    }
-    workerRef.current.postMessage({ type: "stop" } satisfies WorkerRequest);
+    solveAbortRef.current?.abort();
+    solveAbortRef.current = null;
     setRunning(false);
     setIsAnimating(false);
   }
@@ -439,7 +439,7 @@ function App(): JSX.Element {
           </h1>
           <div className="mx-auto mt-3 max-w-2xl text-pretty lg:mx-0">
             <ShinyText
-              text="JSON → солвер в Web Worker → пошаговый playback. Визуальный редактор, связи и 3D."
+              text="JSON → солвер на Node (ПК) через API → пошаговый playback. Визуальный редактор, связи и 3D."
               className="text-base sm:text-lg"
               color="#94a3b8"
               shineColor="#f1f5f9"

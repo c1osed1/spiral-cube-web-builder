@@ -20,5 +20,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "spyral4-assembly.json"]
+  "include": ["src", "server", "spyral4-assembly.json"]
 }

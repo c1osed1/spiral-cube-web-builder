@@ -1,19 +1,14 @@
-import type { BondInterpretation, SearchOptions } from "../solver/types";
+import type { BondInterpretation } from "../solver/types";
+import {
+  DEFAULT_SOLVER_SETTINGS,
+  toSearchOptions,
+  type SolverSettingsForm
+} from "../solver/solverSettingsForm";
 
-export interface SolverSettingsForm extends SearchOptions {
-  unlimitedTime: boolean;
-}
-
-export const DEFAULT_SOLVER_SETTINGS: SolverSettingsForm = {
-  beamWidth: 2600,
-  maxDepth: 220,
-  timeBudgetMs: 420_000,
-  progressEveryExpansions: 2000,
-  strategy: "complete",
-  searchUntilSolved: true,
-  unlimitedTime: false,
-  bondMode: "auto"
-};
+export type { SolverSettingsForm };
+export { DEFAULT_SOLVER_SETTINGS };
+/** @deprecated используйте toSearchOptions из solver/solverSettingsForm */
+export const toWorkerSearchOptions = toSearchOptions;
 
 interface SolverSettingsProps {
   value: SolverSettingsForm;
@@ -30,8 +25,9 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
     <div className="solver-settings">
       <h2 className="mb-1 text-lg font-semibold text-white">Настройки поиска</h2>
       <p className="hint">
-        Полный поиск (complete) может идти очень долго. «Безлимит по времени» — только для полного режима: браузер не
-        остановит по таймеру (остановите вручную «Стоп»).
+        Поиск выполняется на локальном Node-сервере (<code className="text-slate-400">npm run server</code> или{" "}
+        <code className="text-slate-400">npm run dev:full</code>), не во вкладке. Полный режим может идти долго;
+        «Безлимит по времени» — остановите вручную «Стоп».
       </p>
 
       <div className="settings-grid">
@@ -141,16 +137,3 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
   );
 }
 
-export function toWorkerSearchOptions(form: SolverSettingsForm): Partial<SearchOptions> {
-  const unlimited = form.unlimitedTime || form.timeBudgetMs <= 0;
-  return {
-    beamWidth: form.beamWidth,
-    maxDepth: form.maxDepth,
-    timeBudgetMs: unlimited ? 0 : form.timeBudgetMs,
-    progressEveryExpansions: form.progressEveryExpansions,
-    strategy: form.strategy,
-    searchUntilSolved: form.searchUntilSolved,
-    unlimitedTime: unlimited,
-    bondMode: form.bondMode ?? "auto"
-  };
-}
