@@ -18,10 +18,10 @@ interface SearchNode {
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
-  beamWidth: 2200,
-  maxDepth: 180,
+  beamWidth: 50_000,
+  maxDepth: 500,
   timeBudgetMs: 300_000,
-  progressEveryExpansions: 1500,
+  progressEveryExpansions: 50_000,
   strategy: "beam",
   searchUntilSolved: false,
   unlimitedTime: false,
@@ -61,6 +61,19 @@ function normalizeSearchOptions(input: SearchOptions): SearchOptions {
 
 const MAX_PRUNE_MAP_KEYS = 2500;
 const TOP_PRUNE_UI = 14;
+
+/** Не слать одинаковый лучший префикс в onProgress чаще, чем раз в N мс (меньше «задышки» UI/WS). */
+const PROGRESS_DEDUPE_MS = 2800;
+
+/**
+ * Лимит уникальных состояний в beam `seen` (RAM).
+ * ~5M строк состояний + накладные расходы V8 — ориентир под машину ~15 ГБ и heap Node ~12 ГБ
+ * (`NODE_OPTIONS=--max-old-space-size=12288` в npm scripts).
+ */
+const MAX_BEAM_SEEN_KEYS = 5_000_000;
+
+/** Лимит transpose-кэша одной итерации IDA (complete) — тот же порядок памяти. */
+const MAX_COMPLETE_TRANSPOSITION_KEYS = 5_000_000;
 
 function compactStateId(serialized: string): string {
   let h = 2166136261 >>> 0;
@@ -195,8 +208,18 @@ async function solveStateBeam(
     };
   }
 
-  function emitProgress(frontierSize: number): void {
+  let lastEmitSig = "";
+  let lastEmitAt = 0;
+
+  function emitProgress(frontierSize: number, force = false): void {
     if (!onProgress) return;
+    const now = performance.now();
+    const sig = `${bestNode.score}\u0000${bestNode.path.join("\u0001")}\u0000${bestNode.path.length}`;
+    if (!force && sig === lastEmitSig && now - lastEmitAt < PROGRESS_DEDUPE_MS) {
+      return;
+    }
+    lastEmitSig = sig;
+    lastEmitAt = now;
     onProgress({
       elapsedMs: performance.now() - startedAt,
       nodesExpanded,
@@ -229,13 +252,18 @@ async function solveStateBeam(
         prev,
         cfg,
         targetStickers,
-        targetBondKey
+        targetBondKey,
+        node.path.length
       )) {
         const key = serializeState(nextState);
         if (seen.has(key)) {
           beamSeenPrunes += 1;
           recordPruneHit(pruneByKey, key, node.path.length + 1);
           continue;
+        }
+        if (seen.size >= MAX_BEAM_SEEN_KEYS) {
+          const elapsed = performance.now() - startedAt;
+          return makeResult(false, "memory_cap", bestNode.path, elapsed, nodesExpanded);
         }
         seen.add(key);
 
@@ -275,6 +303,7 @@ async function solveStateBeam(
 
     nextLayer.sort((a, b) => a.score - b.score || a.path.length - b.path.length);
     frontier = nextLayer.slice(0, cfg.beamWidth);
+    emitProgress(frontier.length, true);
   }
 
   const totalElapsed = performance.now() - startedAt;
@@ -340,6 +369,23 @@ async function solveStateComplete(
     const pathSet = new Set<string>([serializeState(initialState)]);
     const minPathLenByState = new Map<string, number>();
 
+    const reportProgress: ((payload: SearchProgress) => void) | undefined = onProgress
+      ? (() => {
+          let lastSig = "";
+          let lastAt = 0;
+          return (payload: SearchProgress): void => {
+            const sig = `${payload.bestScore}\u0000${payload.bestPath.join("\u0001")}\u0000${payload.idaDepthLimit ?? 0}\u0000${payload.maxPrefixDepthThisIda ?? 0}`;
+            const now = performance.now();
+            if (sig === lastSig && now - lastAt < PROGRESS_DEDUPE_MS) {
+              return;
+            }
+            lastSig = sig;
+            lastAt = now;
+            onProgress(payload);
+          };
+        })()
+      : undefined;
+
     const found = await dfsDepthLimited({
       state: initialState,
       prevMove: undefined,
@@ -374,7 +420,7 @@ async function solveStateComplete(
           return bestScore;
         }
       },
-      onProgress
+      onProgress: reportProgress
     });
 
     if (found.status === "solved") {
@@ -385,6 +431,9 @@ async function solveStateComplete(
     }
     if (found.status === "aborted") {
       return makeResult(false, "aborted", bestPath, performance.now() - startedAt, nodesExpanded);
+    }
+    if (found.status === "memory_cap") {
+      return makeResult(false, "memory_cap", bestPath, performance.now() - startedAt, nodesExpanded);
     }
   }
 
@@ -419,15 +468,37 @@ type DfsOutcome =
   | { status: "solved"; path: MoveName[] }
   | { status: "timeout" }
   | { status: "continue" }
-  | { status: "aborted" };
+  | { status: "aborted" }
+  | { status: "memory_cap" };
 
-/** Сначала разветвляем ходы с лучшим эвристическим score — быстрее находим цель и лучший префикс. */
+/** Детерминированная «соль» от состояния и глубины — при равной h меняется порядок ходов, меньше однообразных циклов в разветвлении. */
+function stickerTieSalt(state: CubeState, pathDepth: number): number {
+  let h = Math.imul(pathDepth, 0x9e3779b9) >>> 0;
+  const s = state.stickers;
+  const step = Math.max(1, Math.floor(s.length / 32));
+  for (let i = 0; i < s.length; i += step) {
+    const st = s[i]!;
+    h = (Math.imul(h, 65599) ^ st.charCodeAt(0)) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function moveTieRank(move: MoveName): number {
+  let u = 0;
+  for (let i = 0; i < move.length; i += 1) {
+    u = (Math.imul(u, 33) + move.charCodeAt(i)) >>> 0;
+  }
+  return u >>> 0;
+}
+
+/** Сначала разветвляем ходы с лучшим эвристическим score; при равной h — порядок от соль+ход (не только localeCompare). */
 function orderedChildMoves(
   state: CubeState,
   prevMove: MoveName | undefined,
   cfg: SearchOptions,
   targetStickers: CubeState["stickers"] | null,
-  targetBondKey: string | null
+  targetBondKey: string | null,
+  pathDepth = 0
 ): { move: MoveName; nextState: CubeState }[] {
   const rawMoves = legalMoves(state, prevMove, bondMode(cfg));
   const pm = prevMove;
@@ -436,7 +507,15 @@ function orderedChildMoves(
     const nextState = applyMove(state, move);
     return { move, nextState, h: evaluateState(nextState, targetStickers, targetBondKey) };
   });
-  scored.sort((a, b) => a.h - b.h || a.move.localeCompare(b.move));
+  const salt = stickerTieSalt(state, pathDepth);
+  scored.sort((a, b) => {
+    if (a.h !== b.h) {
+      return a.h - b.h;
+    }
+    const ra = (moveTieRank(a.move) ^ salt) >>> 0;
+    const rb = (moveTieRank(b.move) ^ salt) >>> 0;
+    return ra !== rb ? ra - rb : a.move.localeCompare(b.move);
+  });
   return scored;
 }
 
@@ -460,7 +539,8 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
     args.prevMove,
     args.cfg,
     args.targetStickers,
-    args.targetBondKey
+    args.targetBondKey,
+    args.path.length
   )) {
     const key = serializeState(nextState);
     if (args.pathSet.has(key)) {
@@ -478,6 +558,9 @@ async function dfsDepthLimited(args: DfsArgs): Promise<DfsOutcome> {
       args.metrics.transposePrunes += 1;
       recordPruneHit(args.metrics.pruneByKey, key, prevBest);
       continue;
+    }
+    if (!args.minPathLenByState.has(key) && args.minPathLenByState.size >= MAX_COMPLETE_TRANSPOSITION_KEYS) {
+      return { status: "memory_cap" };
     }
     args.minPathLenByState.set(key, pathLen);
 

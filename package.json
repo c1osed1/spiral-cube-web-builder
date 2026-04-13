@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "concurrently -n srv,vite -c cyan,magenta \"npm run server\" \"npm run dev\"",
-    "server": "tsx server/index.ts",
+    "server": "NODE_OPTIONS=--max-old-space-size=12288 tsx server/index.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "solve:console": "tsx src/scripts/solver-console.ts"
+    "solve:console": "NODE_OPTIONS=--max-old-space-size=12288 tsx src/scripts/solver-console.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

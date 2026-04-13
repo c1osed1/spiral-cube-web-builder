@@ -27,8 +27,9 @@ export function SolverSettings({ value, onChange, disabled }: SolverSettingsProp
       <p className="hint">
         Поиск на Node (<code className="text-slate-400">npm run server</code> /{" "}
         <code className="text-slate-400">npm run dev:full</code>): прогресс по WebSocket{" "}
-        <code className="text-slate-400">/api/ws/solve</code>. Полный режим может идти долго;
-        «Безлимит по времени» — остановите вручную «Стоп».
+        <code className="text-slate-400">/api/ws/solve</code>. Полный режим может идти долго; «Безлимит по времени» — стоп
+        вручную. Сервер стартует с heap ~12 ГБ через{" "}
+        <code className="font-mono text-slate-400">NODE_OPTIONS</code> в <code className="font-mono text-slate-400">npm run server</code>.
       </p>
 
       <div className="settings-grid">

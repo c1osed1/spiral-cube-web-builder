@@ -292,6 +292,8 @@ function reasonLabel(reason: SearchResult["reason"]): string {
       return "фронтир исчерпан";
     case "aborted":
       return "остановлено";
+    case "memory_cap":
+      return "лимит памяти (seen)";
     default:
       return reason;
   }

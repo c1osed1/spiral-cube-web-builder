@@ -5,7 +5,6 @@
  * Два пути: /api/ws/solve (через Vite proxy /api) и /ws/solve — если прокси режет префикс /api.
  */
 import http from "node:http";
-import { parse } from "node:url";
 import cors from "cors";
 import express from "express";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
@@ -13,6 +12,15 @@ import { searchOptionsFromHttpBody } from "../src/solver/httpSolveOptions";
 import { runSolveJob } from "../src/solver/runSolveJob";
 
 const PORT = Number(process.env.SOLVER_PORT ?? process.env.PORT ?? 8787);
+
+function upgradeRequestPathname(rawUrl: string | undefined): string {
+  const path = rawUrl && rawUrl.length > 0 ? rawUrl : "/";
+  try {
+    return new URL(path, "http://127.0.0.1").pathname.replace(/\/+$/, "") || "/";
+  } catch {
+    return "/";
+  }
+}
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "4mb" }));
@@ -152,7 +160,7 @@ const wss = new WebSocketServer({ noServer: true });
 registerSolveSocket(wss);
 
 httpServer.on("upgrade", (request, socket, head) => {
-  const pathname = (parse(request.url ?? "", false).pathname ?? "/").replace(/\/+$/, "") || "/";
+  const pathname = upgradeRequestPathname(request.url);
   if (pathname === "/api/ws/solve" || pathname === "/ws/solve") {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);

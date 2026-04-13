@@ -72,7 +72,7 @@ export interface SearchProgress {
 
 export interface SearchResult {
   solved: boolean;
-  reason: "solved" | "timeout" | "depth_limit" | "frontier_exhausted" | "aborted";
+  reason: "solved" | "timeout" | "depth_limit" | "frontier_exhausted" | "aborted" | "memory_cap";
   moves: MoveName[];
   elapsedMs: number;
   nodesExpanded: number;
